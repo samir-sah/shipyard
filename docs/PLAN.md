@@ -85,10 +85,11 @@ Milestone 2 local checks actually run during implementation:
 | `npm run build` | Passed backend and dashboard production build |
 | `docker compose config --quiet` | Passed configuration validation |
 | `npm run test:integration` | All 3 top-level suites skipped without `RUN_INTEGRATION`; no local integration success claimed |
-| CI integration and runtime smoke | Pending; no result claimed here |
+| [CI checks on `91378da`](https://github.com/samir-sah/shipyard/actions/runs/41527804763) | Passed: clean install, type checking, 19 tests with no skips, production build, Compose validation |
+| CI integration and runtime smoke | Passed: 16 PostgreSQL/S3/HTTP integration tests; both Docker images built; backing services, API and worker started; `/health` returned `{"status":"ok"}` |
 | Browser interaction/visual check | Pending; the prior attempt was blocked by an account usage gate |
 
-Full checkout/build/upload/serving evidence remains unverified in this record. Container images, SeaweedFS readiness, real PostgreSQL/S3 integration, and configured Docker resource enforcement require a working Docker host or a completed CI run. Database concurrency tests and S3 tests are implemented; their presence is not a passing result. No throughput or capacity measurements were collected. Run `docs/DEMO.md` before describing this version as end-to-end verified.
+CI verified image builds, SeaweedFS readiness and conditional writes, actual PostgreSQL concurrency/migration behavior, checksum validation, version serving, rollback rejection of altered artifacts, and API/worker startup. The HTTP suite publishes prepared local artifacts through the storage and selection code; a complete public Git checkout through the Docker builder still needs the `docs/DEMO.md` procedure. Docker resource enforcement and browser interaction remain unverified. No throughput or capacity measurements were collected.
 
 Out-of-order completion and rollback-overlap checks now belong to the milestone 2 integration suite. Duplicate delivery across retry/crash boundaries and worker termination during upload remain milestone 3 evidence. Measure queue wait, build duration, throughput, failures, and concurrency on recorded hardware; do not infer capacity from configuration defaults.
 

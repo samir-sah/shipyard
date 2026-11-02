@@ -37,7 +37,7 @@ Queue wait covers creation to claim. Build duration covers claim to completion, 
 
 The policy is **latest requested build**, not latest successful completion. Deployment creation advances the project generation immediately. If A starts, B is requested, and B fails, a later successful completion of A is retained but cannot replace the existing active site. This avoids publishing an earlier request after the operator has requested a newer one.
 
-Restore accepts only a `deployed` version belonging to the project. Before changing database state, it reads the stored completion manifest and rechecks every listed object's actual SHA-256 and size. A missing marker, missing object, corrupt object, or invalid manifest rejects restore without changing the active selection. Legacy milestone 1 versions have an explicit compatibility path described below.
+Restore accepts only a `deployed` version belonging to the project. Before changing database state, it compares the completion manifest with the manifest saved in PostgreSQL and rechecks every listed object's actual SHA-256 and size. A changed marker, missing object, corrupt object, or invalid manifest rejects restore without changing the active selection. Legacy milestone 1 versions have an explicit compatibility path described below.
 
 Once validation succeeds, the rollback transaction locks the project row, checks the target again, advances the project generation, and updates the active pointer. Earlier queued or running builds may finish, upload, and remain in history, but their older generations cannot publish. A deployment requested after rollback receives a newer generation and may publish normally.
 
@@ -61,10 +61,12 @@ Migration `002_version_selection.sql` adds generation columns and a nullable dep
 | Active deployment pointer | Preserved, including serving its existing version |
 | Successful version without a manifest | Remains accessible as a legacy version; restore verifies and seals it lazily |
 | Legacy `NULL` database manifest | Backfilled only when that successful version is restored |
-| Incomplete or altered legacy objects | Restore rejected; active pointer and generation unchanged |
+| Missing legacy index or altered remaining legacy objects | Restore rejected; active pointer and generation unchanged |
 | Additive columns after application downgrade | Left intact; no automatic database downgrade |
 
 Legacy serving is restricted to already persisted successful deployments. It is not a way to publish an unfinished new upload. For restore, the compatibility path lists the old prefix, validates required `index.html`, bounds its file count and size, and reads its objects. Each object's actual SHA-256 must match the metadata recorded by milestone 1. It then creates the completion marker and records the manifest during rollback. The reserved marker file is not exposed as a site artifact.
+
+Milestone 1 stored no complete file list. Legacy discovery cannot detect an asset deleted before discovery when the index and remaining objects still validate. Rebuild a legacy version to obtain the full milestone 2 completeness guarantee.
 
 **Coordinated application stop is required.** Stop both API and worker, wait for graceful worker shutdown, update and build the code/images, then start both new processes. Keep backing services and volumes. Old API/worker code ignores generations and is unsafe to mix with milestone 2 processes. The README contains the upgrade commands.
 
