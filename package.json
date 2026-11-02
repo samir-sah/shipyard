@@ -1,0 +1,42 @@
+{
+  "name": "shipyard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev:api": "tsx watch --env-file-if-exists=.env src/api.ts",
+    "dev:worker": "tsx watch --env-file-if-exists=.env src/worker.ts",
+    "dev:dashboard": "vite --host 127.0.0.1",
+    "build": "tsc -p tsconfig.server.json && vite build",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.checks.json",
+    "test": "tsx --test test/*.test.ts",
+    "test:integration": "tsx --env-file-if-exists=.env --test test/integration/*.test.ts",
+    "start": "node --env-file-if-exists=.env dist/server/api.js",
+    "worker": "node --env-file-if-exists=.env dist/server/worker.js",
+    "demo": "tsx --env-file-if-exists=.env scripts/demo.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1161.0",
+    "bullmq": "6.5.3",
+    "express": "5.3.0",
+    "mime-types": "3.0.2",
+    "pg": "8.23.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/mime-types": "3.0.1",
+    "@types/node": "26.6.6",
+    "@types/pg": "8.23.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.2.1",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vite": "8.3.5"
+  }
+}
