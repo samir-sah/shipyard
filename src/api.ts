@@ -108,7 +108,10 @@ export function createApp() {
     res.json({ logs: result.rows, nextCursor: result.rows.at(-1)?.id ?? after });
   });
 
-  app.get('/sites/:slug', (req, res) => { res.redirect(308, `/sites/${encodeURIComponent(req.params.slug)}/`); });
+  app.get('/sites/:slug', (req, res, next) => {
+    if (req.path.endsWith('/')) { next(); return; }
+    res.redirect(308, `/sites/${encodeURIComponent(req.params.slug)}/`);
+  });
   app.get('/sites/:slug/{*path}', async (req, res) => {
     const result = await pool.query<{ active_deployment_id: string | null }>('SELECT active_deployment_id FROM projects WHERE slug = $1', [req.params.slug]);
     const deploymentId = result.rows[0]?.active_deployment_id;
@@ -119,7 +122,8 @@ export function createApp() {
     res.setHeader('Cache-Control', 'no-store');
     res.redirect(302, `/versions/${encodeURIComponent(req.params.slug)}/${deploymentId}/${suffix}${new URL(req.originalUrl, 'http://localhost').search}`);
   });
-  app.get('/versions/:slug/:deploymentId', (req, res) => {
+  app.get('/versions/:slug/:deploymentId', (req, res, next) => {
+    if (req.path.endsWith('/')) { next(); return; }
     requireUuid(req.params.deploymentId);
     res.redirect(308, `/versions/${encodeURIComponent(req.params.slug)}/${req.params.deploymentId}/`);
   });
