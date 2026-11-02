@@ -40,6 +40,20 @@ function Status({ value }: { value: Deployment['status'] }) {
   return <span className={`status ${value}`}><span aria-hidden="true" />{value}</span>;
 }
 
+export function DeploymentActions({ deployment, project, pending, restoring, onRestore }: {
+  deployment: Pick<Deployment, 'id' | 'status'>;
+  project: Pick<Project, 'slug' | 'activeDeploymentId'>;
+  pending: boolean;
+  restoring: boolean;
+  onRestore: () => void;
+}) {
+  if (deployment.status !== 'deployed') return null;
+  return <div className="deployment-actions">
+    <a href={`/versions/${project.slug}/${deployment.id}/`} target="_blank" rel="noopener noreferrer" aria-label={`Open deployment ${deployment.id.slice(0, 8)}`}>Version <span aria-hidden="true">↗</span></a>
+    {deployment.id !== project.activeDeploymentId && <button className="button restore-button" onClick={onRestore} disabled={pending} aria-label={`Restore deployment ${deployment.id.slice(0, 8)}`}>{restoring ? 'Restoring…' : 'Restore'}</button>}
+  </div>;
+}
+
 export default function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState(savedProject);
@@ -58,6 +72,7 @@ export default function App() {
   const [repoUrl, setRepoUrl] = useState('');
   const [saving, setSaving] = useState(false);
   const [deploying, setDeploying] = useState(false);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [follow, setFollow] = useState(true);
   const logBox = useRef<HTMLDivElement>(null);
@@ -94,6 +109,9 @@ export default function App() {
     setDeployments([]);
     setDeploymentId('');
     setHistoryError('');
+  }, [projectId]);
+
+  useEffect(() => {
     if (!projectId) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
@@ -177,6 +195,20 @@ export default function App() {
     finally { setDeploying(false); }
   }
 
+  async function restore(id: string) {
+    if (!project || restoringId) return;
+    setRestoringId(id);
+    setError('');
+    try {
+      const body = await request<{ project: Project }>(`/api/projects/${project.id}/rollback`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deploymentId: id }),
+      });
+      setProjects(current => current.map(item => item.id === body.project.id ? body.project : item));
+      setRefresh(current => current + 1);
+    } catch (cause) { setError(`Could not restore deployment: ${(cause as Error).message}`); }
+    finally { setRestoringId(null); }
+  }
+
   return <div className="app">
     <header className="topbar">
       <a className="brand" href="/" aria-label="Shipyard home"><svg width="29" height="30" viewBox="0 0 29 30" fill="none" aria-hidden="true"><path d="M14.5 2 27 9v12l-12.5 7L2 21V9L14.5 2Z" stroke="currentColor" strokeWidth="2"/><path d="m2 9 12.5 7L27 9M14.5 16v12M8 5.5l13 7" stroke="currentColor" strokeWidth="2"/></svg><span>shipyard<span className="brand-dot">.</span></span></a>
@@ -208,7 +240,7 @@ export default function App() {
         <div className="breadcrumb">Workspace <span aria-hidden="true">/</span> <span>{project?.name || 'Overview'}</span></div>
         {error && <div className="error-banner" role="alert"><span>{error}</span><button onClick={() => setRefresh(current => current + 1)}>Retry</button></div>}
         {project ? <>
-          <div className="page-heading"><div><div className="eyebrow">PROJECT CONTROL ROOM</div><h1>{project.name}</h1><a className="repo-link" href={project.repoUrl.replace(/\.git$/, '')} target="_blank" rel="noopener noreferrer">{project.repoUrl.replace('https://github.com/', '').replace(/\.git$/, '')}<span aria-hidden="true">↗</span></a></div><button className="button primary deploy-button" onClick={deploy} disabled={deploying}><span aria-hidden="true">↑</span>{deploying ? 'Queueing…' : 'Deploy latest'}</button></div>
+          <div className="page-heading"><div><div className="eyebrow">PROJECT CONTROL ROOM</div><h1>{project.name}</h1><a className="repo-link" href={project.repoUrl.replace(/\.git$/, '')} target="_blank" rel="noopener noreferrer">{project.repoUrl.replace('https://github.com/', '').replace(/\.git$/, '')}<span aria-hidden="true">↗</span></a></div><button className="button primary deploy-button" onClick={deploy} disabled={deploying || restoringId !== null}><span aria-hidden="true">↑</span>{deploying ? 'Queueing…' : 'Deploy latest'}</button></div>
 
           <section className="project-summary" aria-label="Project details">
             <div className="summary-block"><span className="section-label">LIVE SITE</span>{project.activeDeploymentId ? <a className="site-link" href={`/sites/${project.slug}/`} target="_blank" rel="noopener noreferrer">Open deployment <span aria-hidden="true">↗</span></a> : <strong className="muted">Awaiting first deployment</strong>}<small className="route">/sites/{project.slug}/</small></div>
@@ -218,10 +250,11 @@ export default function App() {
 
           <section className="history-section" aria-labelledby="history-title">
             <div className="section-heading"><h2 id="history-title">Deployments <span className="count">{deployments.length}</span></h2><span className="refresh-label"><span aria-hidden="true"/>Updates every 2 seconds</span></div>
+            <p className="deployment-policy">Only the latest requested build can go live. Restoring a version supersedes earlier requests; queued or running builds can finish as retained versions.</p>
             {historyError && <p className="inline-error" role="alert">Could not load deployment history: {historyError}</p>}
-            <div className="table-wrap"><table><thead><tr><th>Deployment</th><th>Status</th><th>Queued at</th><th>Queue wait</th><th>Build time</th></tr></thead><tbody>
-              {deployments.map(item => <tr key={item.id} className={item.id === deploymentId ? 'selected-row' : ''}><td><button className="deployment-select" onClick={() => setDeploymentId(item.id)} aria-pressed={item.id === deploymentId}><span className="deployment-hash">{item.id.slice(0, 8)}</span>{item.id === project.activeDeploymentId && <span className="active-tag">LIVE</span>}<small>{item.commitSha ? item.commitSha.slice(0, 7) : 'Awaiting checkout'}</small></button></td><td><Status value={item.status}/></td><td className="date-cell">{timestamp(item.createdAt)}</td><td className="mono">{duration(item.queueWaitMs)}</td><td className="mono">{duration(item.buildDurationMs)}</td></tr>)}
-              {!deployments.length && <tr><td colSpan={5} className="table-empty">{historyLoading ? 'Loading deployments…' : 'No deployments yet. Deploy the latest commit to get started.'}</td></tr>}
+            <div className="table-wrap"><table><thead><tr><th>Deployment</th><th>Status</th><th>Queued at</th><th>Queue wait</th><th>Build time</th><th>Actions</th></tr></thead><tbody>
+              {deployments.map(item => <tr key={item.id} className={item.id === deploymentId ? 'selected-row' : ''}><td><button className="deployment-select" onClick={() => setDeploymentId(item.id)} aria-pressed={item.id === deploymentId}><span className="deployment-hash">{item.id.slice(0, 8)}</span>{item.id === project.activeDeploymentId && <span className="active-tag">LIVE</span>}<small>{item.commitSha ? item.commitSha.slice(0, 7) : 'Awaiting checkout'}</small></button></td><td><Status value={item.status}/></td><td className="date-cell">{timestamp(item.createdAt)}</td><td className="mono">{duration(item.queueWaitMs)}</td><td className="mono">{duration(item.buildDurationMs)}</td><td><DeploymentActions deployment={item} project={project} pending={restoringId !== null || deploying} restoring={restoringId === item.id} onRestore={() => { void restore(item.id); }}/></td></tr>)}
+              {!deployments.length && <tr><td colSpan={6} className="table-empty">{historyLoading ? 'Loading deployments…' : 'No deployments yet. Deploy the latest commit to get started.'}</td></tr>}
             </tbody></table></div>
           </section>
 
@@ -234,7 +267,7 @@ export default function App() {
             </div><div className="terminal-footer"><span>{deployment ? `${deployment.status} · ${logs.length} log entries shown` : 'No deployment selected'}</span><span>{deployment?.logTruncated ? 'Log storage limit reached' : logs.length === 1000 ? 'Showing the latest 1,000 entries' : 'Incremental log polling'}</span></div>
           </section>
         </> : <section className="welcome"><span className="eyebrow">FROM REPOSITORY TO RELEASE</span><h1>Your next site,<br/><span>ready to launch.</span></h1><p>Connect a public Vite repository. Shipyard builds your code and serves a new deployment on your own infrastructure.</p><button className="button primary" onClick={() => { setShowCreate(true); document.getElementById('project-name')?.focus(); }}>Create your first project <span aria-hidden="true">↗</span></button><div className="welcome-flow"><span>01 <strong>Connect Git</strong></span><span>02 <strong>Build in Docker</strong></span><span>03 <strong>Go live</strong></span></div></section>}
-        <footer className="main-footer"><span>SHIPYARD <span className="footer-slash">/</span> MILESTONE 01</span><span>Trusted repositories · Local workspace</span></footer>
+        <footer className="main-footer"><span>SHIPYARD <span className="footer-slash">/</span> MILESTONE 02</span><span>Trusted repositories · Local workspace</span></footer>
       </main>
     </div>
   </div>;

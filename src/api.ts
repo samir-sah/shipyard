@@ -7,9 +7,10 @@ import { Readable } from 'node:stream';
 import { HeadBucketCommand } from '@aws-sdk/client-s3';
 import { lookup } from 'mime-types';
 import { config } from './config.js';
-import { pool, migrate, projectColumns, deploymentColumns } from './db.js';
-import { s3, ensureBucket, getArtifact } from './storage.js';
+import { pool, migrate, projectColumns, deploymentColumns, createDeployment, rollbackDeployment } from './db.js';
+import { s3, ensureBucket, getArtifact, validateStoredVersion } from './storage.js';
 import { artifactKey, InputError, logCursor, parseProject, requireUuid } from './validation.js';
+import type { ArtifactManifest } from './contracts.js';
 
 async function enqueue(id: string): Promise<void> {
   try { await (await import('./queue.js')).enqueueDeployment(id); }
@@ -56,8 +57,8 @@ export function createApp() {
     let deployment;
     try {
       await client.query('BEGIN');
-      project = (await client.query(`INSERT INTO projects(id, name, slug, repo_url) VALUES ($1, $2, $3, $4) RETURNING ${projectColumns}`, [id, input.name, slug, input.repoUrl])).rows[0];
-      deployment = (await client.query(`INSERT INTO deployments(id, project_id) VALUES ($1, $2) RETURNING ${deploymentColumns}`, [deploymentId, id])).rows[0];
+      project = (await client.query(`INSERT INTO projects(id, name, slug, repo_url, publish_generation) VALUES ($1, $2, $3, $4, 1) RETURNING ${projectColumns}`, [id, input.name, slug, input.repoUrl])).rows[0];
+      deployment = (await client.query(`INSERT INTO deployments(id, project_id, publish_generation) VALUES ($1, $2, 1) RETURNING ${deploymentColumns}`, [deploymentId, id])).rows[0];
       await client.query('COMMIT');
     } catch (error) { await client.query('ROLLBACK'); throw error; }
     finally { client.release(); }
@@ -67,11 +68,26 @@ export function createApp() {
 
   app.post('/api/projects/:id/deployments', async (req, res) => {
     const projectId = requireUuid(req.params.id);
-    const id = randomUUID();
-    const result = await pool.query(`INSERT INTO deployments(id, project_id) SELECT $1, id FROM projects WHERE id = $2 RETURNING ${deploymentColumns}`, [id, projectId]);
-    if (!result.rowCount) { res.status(404).json({ error: 'Project not found' }); return; }
-    await enqueue(id);
-    res.status(201).json({ deployment: result.rows[0] });
+    const deployment = await createDeployment(projectId);
+    if (!deployment) { res.status(404).json({ error: 'Project not found' }); return; }
+    await enqueue(deployment.id);
+    res.status(201).json({ deployment });
+  });
+
+  app.post('/api/projects/:id/rollback', async (req, res) => {
+    const projectId = requireUuid(req.params.id);
+    if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body) || typeof req.body.deploymentId !== 'string') {
+      throw new InputError('Expected a deploymentId');
+    }
+    const deploymentId = requireUuid(req.body.deploymentId);
+    const target = await pool.query<{ artifact_manifest: ArtifactManifest | null }>("SELECT artifact_manifest FROM deployments WHERE id = $1 AND project_id = $2 AND status = 'deployed'", [deploymentId, projectId]);
+    if (!target.rowCount) { res.status(404).json({ error: 'Completed deployment not found for this project' }); return; }
+    let manifest;
+    try { manifest = await validateStoredVersion(deploymentId, { allowLegacy: target.rows[0].artifact_manifest === null, expectedManifest: target.rows[0].artifact_manifest ?? undefined }); }
+    catch { res.status(409).json({ error: 'Stored version is incomplete or unavailable' }); return; }
+    const project = await rollbackDeployment(projectId, deploymentId, manifest);
+    if (!project) { res.status(404).json({ error: 'Completed deployment not found for this project' }); return; }
+    res.json({ project });
   });
 
   app.get('/api/projects/:id/deployments', async (req, res) => {
@@ -98,7 +114,29 @@ export function createApp() {
     const deploymentId = result.rows[0]?.active_deployment_id;
     if (!deploymentId) { res.status(404).send('No active deployment'); return; }
     const parts = req.params.path as unknown as string[] | undefined;
+    if (parts) artifactKey(parts.join('/'));
+    const suffix = parts?.map(encodeURIComponent).join('/') ?? '';
+    res.setHeader('Cache-Control', 'no-store');
+    res.redirect(302, `/versions/${encodeURIComponent(req.params.slug)}/${deploymentId}/${suffix}${new URL(req.originalUrl, 'http://localhost').search}`);
+  });
+  app.get('/versions/:slug/:deploymentId', (req, res) => {
+    requireUuid(req.params.deploymentId);
+    res.redirect(308, `/versions/${encodeURIComponent(req.params.slug)}/${req.params.deploymentId}/`);
+  });
+  app.get('/versions/:slug/:deploymentId/{*path}', async (req, res) => {
+    const deploymentId = requireUuid(req.params.deploymentId);
+    const version = await pool.query<{ artifact_manifest: ArtifactManifest | null }>(
+      "SELECT d.artifact_manifest FROM deployments d JOIN projects p ON p.id = d.project_id WHERE p.slug = $1 AND d.id = $2 AND d.status = 'deployed'", [req.params.slug, deploymentId],
+    );
+    if (!version.rowCount) { res.status(404).send('Completed version not found'); return; }
+    const parts = req.params.path as unknown as string[] | undefined;
     let key = artifactKey(parts?.join('/') || 'index.html');
+    const manifest = version.rows[0].artifact_manifest;
+    if (key === '__shipyard_manifest.json') { res.status(404).send('Artifact not found'); return; }
+    if (manifest && !manifest.files.some(file => file.key === key)) {
+      if (extname(key)) { res.status(404).send('Artifact not found'); return; }
+      key = 'index.html';
+    }
     let artifact;
     try { artifact = await getArtifact(deploymentId, key); }
     catch (error) {

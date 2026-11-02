@@ -8,8 +8,9 @@ Start with one usable public GitHub-to-static-site path. Preserve existing work;
 - PostgreSQL is the source of truth for projects, deployment status, logs, timing, and active artifact selection.
 - BullMQ/Redis handles asynchronous scheduling. Stable deployment IDs are job IDs. A dispatcher re-enqueues persisted queued records if initial enqueueing fails.
 - Docker runs a fixed root-level Vite recipe on `main`: `npm ci`, then `npm run build -- --base=./`, publishing `dist/`.
-- S3-compatible storage holds one artifact prefix per deployment. SeaweedFS replaces MinIO for local development because current MinIO community distribution is source-only and legacy binary images are unmaintained.
-- Local path routing `/sites/<slug>/` is the first serving mechanism. Sandbox headers restrict deployed documents while dashboard and site paths share an origin.
+- S3-compatible storage holds immutable files and a completion manifest per deployment. SeaweedFS replaces MinIO for local development because current MinIO community distribution is source-only and legacy binary images are unmaintained.
+- PostgreSQL publication generations enforce latest-requested-build ordering and reversible active selection. A superseded successful build remains retained in history.
+- Local `/sites/<slug>/` paths redirect to pinned `/versions/<slug>/<deployment-id>/` paths. Sandbox headers restrict deployed documents while dashboard and site paths share an origin.
 - Trusted repositories only for the initial demo. Limits reduce accidental resource use; they do not establish safe hostile-code isolation.
 
 ## Milestone 1 — first usable slice
@@ -28,15 +29,31 @@ Implementation includes:
 - Separate queue-wait and build-duration timestamps.
 - Focused unit/integration checks, Docker setup, architecture diagram, demo procedure, and an unmeasured benchmark template.
 
-Basic duplicate protection is present, but is not a claim of complete retry/recovery correctness. The active version is the last successful build to finish. Local paths require relative assets and sandbox-compatible sites. Verification status below determines which behavior was actually exercised.
+Basic duplicate protection is present, but is not a claim of complete retry/recovery correctness. Milestone 2 replaces milestone 1's last-successful-completion ordering. Local paths require relative assets and sandbox-compatible sites. Verification status below determines which behavior was actually exercised.
 
 ## Milestone 2 — version selection and rollback
 
-Next incomplete milestone. Add explicit immutable-version manifests and guarded active-pointer updates. Define and test a latest-requested-deployment policy for builds completing out of order. Rollback must choose a fully uploaded previous deployment and invalidate publication from already-running builds according to the documented policy. Test rollback overlapping a build, partial uploads, and failed publication.
+Implementation includes:
+
+- Conditional, non-overwriting artifact writes, actual SHA-256/size verification, and a completion manifest written last.
+- An additive migration for project/deployment publication generations and nullable deployment manifests; existing history and active selection remain.
+- Project-row locking and guarded active-pointer updates. Deployment creation advances the generation. Only a successful build matching the current generation activates.
+- Explicit latest-requested semantics: a newer request suppresses older completions even if that newer request fails. The existing active site remains available.
+- Stored-version restore with full object verification before a transaction advances the generation and changes the active pointer.
+- Restore supersedes already queued/running builds; they may finish as retained versions. A new request after restore may publish.
+- Immutable version URLs and non-cacheable active redirects, so a document and its relative assets remain pinned across publication changes.
+- Dashboard version links and restore controls. `deployed` describes a successful retained build; the **LIVE** marker reflects the active pointer.
+- Legacy milestone 1 success compatibility: existing serving/history remain; restore verifies and lazily seals old versions without a destructive reset.
+- Regression cases for out-of-order completion, newer-request failure, rollback overlapping completion, invalid restore targets, migration preservation, incomplete uploads, immutable writes, and changed/missing objects.
+- A CI integration job that starts PostgreSQL/Redis/S3 services, builds platform and builder images, and runs the opt-in integration suite. Adding this job does not establish that a run passed.
+
+The winner is defined by committed PostgreSQL project-row lock ordering, not HTTP arrival time. Before upgrading, stop both API and worker; milestone 1 processes ignore generations and must not overlap milestone 2 processes. See the README upgrade procedure and [migration compatibility](ARCHITECTURE.md#migration-compatibility).
+
+Implementation is present; the verification record distinguishes completed checks from outstanding Docker-backed and browser evidence.
 
 ## Milestone 3 — recovery and execution safety
 
-Add expiring worker claims, claim renewal, fencing tokens, safe retries, duplicate delivery tests, and worker termination recovery. Prove that stale workers cannot publish after a claim changes. Recover abandoned temporary workspaces/containers and clean incomplete artifact prefixes. Review timeouts, shutdown, queue growth, checkout/dependency disk limits, and host capacity. Keep the Docker socket and platform credentials out of every build container.
+**Next incomplete milestone.** Add expiring worker claims, claim renewal, fencing tokens, safe retries, duplicate delivery tests, and worker termination recovery. Prove that stale workers cannot publish after a claim changes. Project publication generations are not worker-ownership fencing. Recover abandoned temporary workspaces/containers and clean incomplete artifact prefixes. Review timeouts, shutdown, queue growth, checkout/dependency disk limits, and host capacity. Keep the Docker socket and platform credentials out of every build container.
 
 ## Milestone 4 — integration and operation
 
@@ -46,7 +63,7 @@ Custom domains, additional build recipes, Kubernetes, and arbitrary backend appl
 
 ## Verification record
 
-Checked November 3, 2026, on Windows with Node.js 22.15.0 and npm 10.9.2:
+Milestone 1 baseline, checked November 3, 2026, on Windows with Node.js 22.15.0 and npm 10.9.2:
 
 | Command/check | Actual outcome |
 | --- | --- |
@@ -59,9 +76,21 @@ Checked November 3, 2026, on Windows with Node.js 22.15.0 and npm 10.9.2:
 | Docker Engine / full demo | Blocked: Docker Desktop failed during startup on its `sailor-ingest.sock` listener; engine unavailable |
 | Browser visual check | Blocked by automatic approval review because account usage limits prevented browser access |
 
-Milestone 1 implementation is present, but full checkout/build/upload/serving evidence remains unverified. Container images, SeaweedFS readiness, real PostgreSQL/S3 integration, and configured Docker resource enforcement still require a working Docker host. No throughput or capacity measurements were collected. Run `docs/DEMO.md` before describing this version as end-to-end verified.
+Milestone 2 local checks actually run during implementation:
 
-The required later acceptance cases remain: duplicate delivery, worker termination during upload, out-of-order completion, and rollback overlapping a build. Measure queue wait, build duration, throughput, failures, and concurrency on recorded hardware; do not infer capacity from configuration defaults.
+| Command/check | Actual outcome |
+| --- | --- |
+| `npm run typecheck` | Passed dashboard, backend, scripts and test type checking |
+| `npm test` | 18 passed, 0 failed, 1 skipped: Windows denied symlink creation; includes 3 dashboard action tests |
+| `npm run build` | Passed backend and dashboard production build |
+| `docker compose config --quiet` | Passed configuration validation |
+| `npm run test:integration` | All 3 top-level suites skipped without `RUN_INTEGRATION`; no local integration success claimed |
+| CI integration and runtime smoke | Pending; no result claimed here |
+| Browser interaction/visual check | Pending; the prior attempt was blocked by an account usage gate |
+
+Full checkout/build/upload/serving evidence remains unverified in this record. Container images, SeaweedFS readiness, real PostgreSQL/S3 integration, and configured Docker resource enforcement require a working Docker host or a completed CI run. Database concurrency tests and S3 tests are implemented; their presence is not a passing result. No throughput or capacity measurements were collected. Run `docs/DEMO.md` before describing this version as end-to-end verified.
+
+Out-of-order completion and rollback-overlap checks now belong to the milestone 2 integration suite. Duplicate delivery across retry/crash boundaries and worker termination during upload remain milestone 3 evidence. Measure queue wait, build duration, throughput, failures, and concurrency on recorded hardware; do not infer capacity from configuration defaults.
 
 ## Dependency decisions and official references
 

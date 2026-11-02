@@ -22,5 +22,11 @@ test('API rejects cross-origin writes, form posts and invalid input before persi
     assert.equal(response.status, 400);
     response = await fetch(`${base}/api/projects/not-an-id/deployments`);
     assert.equal(response.status, 400);
+    for (const body of [{}, [], null, { deploymentId: 12 }, { deploymentId: 'bad-id' }]) {
+      response = await fetch(`${base}/api/projects/00000000-0000-0000-0000-000000000001/rollback`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      assert.equal(response.status, 400);
+    }
+    response = await fetch(`${base}/api/projects/not-an-id/rollback`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(response.status, 400);
   } finally { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
 });

@@ -1,5 +1,12 @@
 export type DeploymentStatus = 'queued' | 'building' | 'failed' | 'deployed';
 
+export interface ArtifactManifest {
+  version: 1;
+  deploymentId: string;
+  files: Array<{ key: string; size: number; sha256: string }>;
+  totalBytes: number;
+}
+
 export interface Project {
   id: string;
   name: string;

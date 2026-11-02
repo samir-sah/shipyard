@@ -12,7 +12,7 @@
     "dev:dashboard": "vite --host 127.0.0.1",
     "build": "tsc -p tsconfig.server.json && vite build",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.checks.json",
-    "test": "tsx --test test/*.test.ts",
+    "test": "tsx --test test/*.test.ts dashboard/src/*.test.tsx",
     "test:integration": "tsx --env-file-if-exists=.env --test test/integration/*.test.ts",
     "start": "node --env-file-if-exists=.env dist/server/api.js",
     "worker": "node --env-file-if-exists=.env dist/server/worker.js",

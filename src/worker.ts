@@ -5,6 +5,7 @@ import { connectionOptions, queueName, queue, dispatchQueued } from './queue.js'
 import { ensureBucket, uploadArtifacts, s3 } from './storage.js';
 import { buildRepository } from './build.js';
 import { requireUuid } from './validation.js';
+import type { ArtifactManifest } from './contracts.js';
 
 async function deploy(id: string): Promise<void> {
   const repoUrl = await claimDeployment(id);
@@ -18,14 +19,18 @@ async function deploy(id: string): Promise<void> {
     // Attach a handler immediately; the awaited chain still reports persistence failures below.
     void pendingLogs.catch(() => {});
   };
+  let publication: 'active' | 'superseded' | null = null;
   try {
     let commitSha = '';
+    let manifest: ArtifactManifest | undefined;
     await buildRepository(id, repoUrl, log, async (directory, sha, signal) => {
-      await uploadArtifacts(id, directory, signal);
+      manifest = await uploadArtifacts(id, directory, signal);
       commitSha = sha;
     });
     await pendingLogs;
-    if (!await activateDeployment(id, commitSha)) throw new Error('Deployment is no longer building');
+    if (!manifest) throw new Error('Build did not produce a complete artifact version');
+    publication = await activateDeployment(id, commitSha, manifest);
+    if (!publication) throw new Error('Deployment is no longer building');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await pendingLogs.catch(logError => console.error('Could not persist build logs', logError));
@@ -33,7 +38,7 @@ async function deploy(id: string): Promise<void> {
     await appendLog(id, 'system', `Deployment failed: ${message}\n`).catch(console.error);
     throw error;
   }
-  await appendLog(id, 'system', 'Deployment is live.\n').catch(error => console.error('Could not persist completion log', error));
+  await appendLog(id, 'system', publication === 'active' ? 'Deployment is live.\n' : 'Build retained as a version. A newer deployment request or rollback controls the active site.\n').catch(error => console.error('Could not persist completion log', error));
 }
 
 await migrate();
