@@ -131,10 +131,11 @@ test('worker upload crashes recover without publishing an abandoned attempt', { 
       assert.equal(container.HostConfig.NanoCpus, config.buildCpus * 1_000_000_000);
       assert.equal(container.HostConfig.PidsLimit, config.buildPids);
       assert.ok(!JSON.stringify(container.Mounts).includes('docker.sock'));
-      await docker(['start', '--attach', name]).catch(() => {});
+      let startError = '';
+      await docker(['start', '--attach', name]).catch(error => { startError = String(error); });
       const stopped = JSON.parse(await docker(['inspect', name]))[0];
       assert.equal(stopped.State.Running, false);
-      assert.equal(stopped.State.ExitCode, 124, 'Container deadline must survive loss of its worker');
+      assert.equal(stopped.State.ExitCode, 124, `Container deadline must survive loss of its worker: ${JSON.stringify({ state: stopped.State, startError, logs: await docker(['logs', name]).catch(String) })}`);
       await cleanupBuildResources();
       await docker(['inspect', name]);
       await access(workspace);
