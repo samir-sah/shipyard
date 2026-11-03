@@ -17,7 +17,7 @@ export function containerArguments(id: string, token: string, repoUrl: string, c
     '--pids-limit', String(config.buildPids), '--cap-drop', 'ALL',
     '--security-opt', 'no-new-privileges:true', '--mount', `type=volume,source=shipyard-work-${token},destination=/work`,
     '--tmpfs', '/tmp:rw,nosuid,size=268435456,uid=1000,gid=1000',
-    '--log-driver', 'local', '--log-opt', 'max-size=2m', '--log-opt', 'max-file=1',
+    '--log-driver', 'local', '--log-opt', 'max-size=2m', '--log-opt', 'max-file=1', '--log-opt', 'compress=false',
     '--entrypoint', '/usr/bin/timeout',
     config.buildImage, '--signal=TERM', '--kill-after=10s', `${config.buildTimeoutMs / 1000}s`, '/usr/local/bin/shipyard-build', repoUrl, ...(commitSha ? [commitSha] : []),
   ];
