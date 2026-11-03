@@ -2,6 +2,16 @@
 
 This procedure exercises all four milestones. Actual results belong in `PLAN.md`; these steps are not evidence that they have already passed. Upgrade older installations using the coordinated API/worker stop and credential setup in the README. Retention stays disabled by default.
 
+## Automated public checkout smoke
+
+CI runs `npx tsx --env-file=.env scripts/public-demo.ts` after starting the actual API and worker. This development-only runner reads the first configured operator key in memory and invokes the existing demo helper. It creates a unique project, makes duplicate enqueue calls, and checks the completed deployment, active selection, reviewed commit, manifest identity, both pinned serving routes, every file's size/SHA-256, entry asset references, and CSP boundaries. Deterministic integration tests separately prove duplicate claim/delivery fencing; the enqueue calls alone do not establish repeated delivery.
+
+The transient fixture is [adrianhajdin/nike_landing_page](https://github.com/adrianhajdin/nike_landing_page/tree/cfda8c5841b6e57f644f19aa10c4329553162a15), reviewed at `cfda8c5841b6e57f644f19aa10c4329553162a15`. Its root npm lock, build/install scripts, Vite/React/Tailwind/PostCSS configuration and application JavaScript were inspected before execution. Vite 4.4.9 builds React 18.2.0; esbuild's platform-binary installer is the relevant Linux install hook. Source has no backend or environment requirements. Browser CSS requests Google Fonts. This old third-party dependency tree is not a recommendation for new applications. The repository has no license file; no fixture source is vendored or redistributed by Shipyard, and the CI site is discarded with the disposable services.
+
+The runner rejects a changed `main` SHA rather than silently treating new source as reviewed. Review any update before changing its constants. GitHub/npm availability remains an external dependency. Reproduce only against disposable development services, with the builder image, API and one worker already running. This script creates a project; it does not clean up an existing installation.
+
+The `public-demo` CI artifact contains sanitized `.tmp/public-demo.json`: platform/fixture SHAs, deployment timestamps, first queue wait, deployment elapsed time, attempts, output files/bytes, machine/runtime details, configured limits and explicit unchecked items. No access token or secret is saved. Each build gets a fresh work volume and npm cache; image layers are already built, and network/storage caches are uncontrolled. This is one functional smoke, not a throughput or supported-concurrency benchmark. Fetching static assets does not demonstrate browser JavaScript execution, wildcard DNS, visual layout or HTTPS.
+
 ## Prepare a trusted public fixture
 
 Use a small Vite repository that you own, with a root `package.json`, committed `package-lock.json`, branch `main`, and output `dist/index.html`. Do not submit this Shipyard repository itself: its build produces the platform dashboard under `dist/dashboard`, outside the supported recipe.
@@ -166,8 +176,9 @@ For an intentional operated installation, follow [the retention procedure](DEPLO
 Do not present the following as completed evidence merely because their procedures or tests exist:
 
 - Milestone 2 ordering/rollback and milestone 3 recovery cases have the CI results linked in `PLAN.md`; retain their exact infrastructure/scenario limits.
-- Milestone 4 ownership, signed delivery, host routing and retention are implemented; collect their actual final CI and browser results before claiming verification.
-- Public Git checkout through the fixed Docker recipe, browser interaction, HTTPS/proxy setup and the benchmark workload still need recorded demonstrations.
+- Milestone 4 ownership, signed delivery, host routing and retention have the CI results linked in `PLAN.md`; browser interaction remains separate.
+- Public Git checkout through the fixed Docker recipe passed in CI; [RESULTS.md](RESULTS.md) records its one-run environment and timing.
+- Browser interaction, HTTPS/proxy setup and the benchmark workload still need recorded demonstrations.
 
 Database tokens and leases govern duplicate/recovery safety. Test evidence still applies only to the scenarios and infrastructure actually exercised.
 

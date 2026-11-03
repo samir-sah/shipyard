@@ -86,7 +86,7 @@ Implementation includes:
 - A manual dedicated-host deployment procedure covering credentials, HTTPS/DNS/proxy boundaries, health/log monitoring, backups, upgrades and failure handling. An example Nginx config uses operator-supplied certificates; TLS was not provisioned or deployed by these changes.
 - Isolated-schema SQL/security/webhook/retention tests, so maintenance test fixtures cannot tombstone existing development projects.
 
-All four implementation milestones are present. Remaining work is verification and evidence: run the final CI suite, complete the public Git-to-Docker recipe demonstration, inspect dashboard/site interactions in a browser, and collect the benchmark workload on recorded hardware. These are not an additional feature milestone. Production reliability and hostile-code isolation remain unproven.
+All four implementation milestones are present. Final CI and the public Git-to-Docker recipe smoke passed, with results below. Remaining work is browser interaction, a real HTTPS/proxy deployment, and the benchmark workload on recorded hardware. These are not an additional feature milestone. Production reliability and hostile-code isolation remain unproven.
 
 Custom domains, additional build recipes, Kubernetes, and arbitrary backend applications remain deferred. Backend applications need a separate runtime lifecycle design.
 
@@ -150,6 +150,19 @@ Milestone 4 verification, November 3, 2026:
 | Public Git recipe, browser, production TLS/proxy, performance | Not verified in this snapshot |
 
 CI verified account/project isolation, session boundaries, signed raw-body delivery handling and persistent deduplication, project secret rotation, host routing, protected retention/tombstone recovery, migration preservation, and all earlier crash/retry scenarios. Retention fixtures used random isolated database schemas; other integration fixtures used unique IDs in disposable services. Generated local credentials were also checked absent from 33 build files, and `.env` is ignored by Git. A complete public Git recipe, browser interaction, real HTTPS/reverse-proxy deployment and capacity measurements remain unverified. All four planned implementation milestones are present; these are remaining verification and operational work, not production guarantees.
+
+Public Git-to-site verification, November 3, 2026:
+
+| Command/check | Actual outcome |
+| --- | --- |
+| Local `npm run typecheck` | Passed, including the new verification runner |
+| [CI on `607858b`](https://github.com/samir-sah/shipyard/actions/runs/41685329438) | Passed clean install, type checking, 37 unit tests, production build and Compose validation |
+| PostgreSQL/Redis/S3/Docker tests | All 40 passed without skips; API and worker started successfully |
+| `npx tsx --env-file=.env scripts/public-demo.ts` | Passed real public Git checkout, npm install, Vite build, S3 publication and both pinned HTTP serving paths |
+| Observed result | One attempt; 11.151 ms first queue wait; 16,021.577 ms deployment elapsed; 35 files / 3,282,526 bytes |
+| Output verification | Every file size/SHA-256, manifest/commit identity, active selection, static entry references and CSP boundaries passed |
+
+The fixture's actual SHA matched reviewed `cfda8c5841b6e57f644f19aa10c4329553162a15`. [RESULTS.md](RESULTS.md) records environment, cache conditions, configured limits and durable sanitized evidence. This is a single functional smoke, not a capacity measurement. Existing crash/failure/ordering/rollback suites still use their documented deterministic fixtures. Browser execution, DNS/TLS/proxy operation and supported aggregate concurrency remain unchecked.
 
 ## Dependency decisions and official references
 

@@ -84,7 +84,7 @@ RUN_INTEGRATION=1 RUN_DOCKER_TESTS=1 npm run test:integration
 
 In PowerShell, set `$env:RUN_INTEGRATION='1'` and `$env:RUN_DOCKER_TESTS='1'` before the last command. Integration tests require running backing services; Docker cases also require the builder image and a Linux daemon. Retention/ownership maintenance suites use isolated random PostgreSQL schemas. Other suites use unique fixture IDs in the configured database; run them against disposable development services. Never infer a passing integration run from an unset flag and skipped tests.
 
-The [demo guide](docs/DEMO.md) covers successful/failed deployments, rollback, crashes, ownership, webhook redelivery, and retention. The helper now requires `SHIPYARD_TOKEN` set explicitly to an operator access token. [Benchmarks](docs/BENCHMARK.md) remain unmeasured.
+The [demo guide](docs/DEMO.md) covers successful/failed deployments, rollback, crashes, ownership, webhook redelivery, and retention. The helper requires `SHIPYARD_TOKEN` set explicitly to an operator access token. CI also runs a reviewed public Vite repository through the real Docker build and verifies every served artifact. [Recorded results](docs/RESULTS.md) include its observed timing and machine limits; [capacity benchmarks](docs/BENCHMARK.md) remain unmeasured.
 
 ## Upgrade and operation
 

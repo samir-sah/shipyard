@@ -1,6 +1,6 @@
 # Benchmark and portfolio evidence
 
-**Status: unmeasured.** Configuration limits are not measurements. Fill this report only from completed runs; keep raw results and failed attempts.
+**Capacity benchmark status: unmeasured.** A separate [single public deployment smoke](RESULTS.md) records actual timing, output and environment. It does not supply a repeated workload, percentiles or supported-concurrency result. Configuration limits are not measurements. Fill this report only from completed runs; keep raw results and failed attempts.
 
 ## Record the environment
 

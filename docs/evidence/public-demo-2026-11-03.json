@@ -1,0 +1,60 @@
+{
+  "kind": "single functional public Git-to-site smoke; not a capacity benchmark",
+  "recordedAt": "2026-11-03T17:34:12.625Z",
+  "platformSha": "607858b23e5e5c50af1f011558226f157478fb47",
+  "fixture": {
+    "repo": "https://github.com/adrianhajdin/nike_landing_page.git",
+    "reviewedSha": "cfda8c5841b6e57f644f19aa10c4329553162a15",
+    "deployedSha": "cfda8c5841b6e57f644f19aa10c4329553162a15"
+  },
+  "deployment": {
+    "id": "c65a89dc-7f56-480b-84ab-55d75467a2ca",
+    "projectId": "7abafcb5-6d6d-4be0-a744-b171e1d3132a",
+    "status": "deployed",
+    "createdAt": "2026-11-03T17:33:55.913Z",
+    "startedAt": "2026-11-03T17:33:55.924Z",
+    "finishedAt": "2026-11-03T17:34:11.946Z",
+    "queueWaitMs": 11.151,
+    "buildDurationMs": 16021.577,
+    "attemptCount": 1,
+    "files": 35,
+    "bytes": 3282526,
+    "attemptId": "082f3758-1c54-48c9-92b5-65654c815f30"
+  },
+  "checks": [
+    "duplicate enqueue calls (claim/delivery fencing is covered separately by integration tests)",
+    "active selection",
+    "reviewed commit",
+    "manifest identity",
+    "both pinned routes: every file size and SHA-256",
+    "entry asset references remain pinned",
+    "project host and fallback CSP"
+  ],
+  "environment": {
+    "os": "linux 7.0.0-1017-azure",
+    "cpu": "AMD EPYC 9V74 80-Core Processor",
+    "logicalCpus": 4,
+    "memoryBytes": 16760348672,
+    "hostNode": "v24.22.1",
+    "docker": "28.0.4",
+    "compose": "2.38.2",
+    "builderNode": "v24.22.2",
+    "cache": "Fresh per-attempt work volume and npm cache; Docker image layers already built; network/storage caches uncontrolled"
+  },
+  "limits": {
+    "workerProcesses": 1,
+    "workerConcurrency": 1,
+    "cpus": 1,
+    "memoryMb": 512,
+    "pids": 128,
+    "timeoutMs": 300000,
+    "leaseMs": 30000,
+    "maxAttempts": 3
+  },
+  "unchecked": [
+    "browser JavaScript execution and visual layout",
+    "wildcard DNS",
+    "HTTPS/proxy",
+    "capacity and percentiles"
+  ]
+}
