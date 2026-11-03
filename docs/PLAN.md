@@ -138,17 +138,18 @@ The passing CI crash tests paused actual S3 upload or completion-marker handling
 
 Measure first queue wait, deployment elapsed time, per-attempt intervals, retry/recovery delay, throughput, failures, and concurrency on recorded hardware. `buildDurationMs` now includes retry wait and downtime between first claim and terminal completion; it is not a CPU-build measurement. Do not infer capacity from configuration defaults or test durations.
 
-Milestone 4 local snapshot reported during implementation:
+Milestone 4 verification, November 3, 2026:
 
 | Command/check | Actual outcome |
 | --- | --- |
 | `npm run typecheck` | Passed dashboard, server, scripts and test type checking |
 | `npm test` | 36 passed, 0 failed, 1 skipped for Windows symlink privileges |
 | `npm run build` | Passed backend and dashboard production build |
-| M4 PostgreSQL/Redis/S3/Docker CI | Pending final push/run; added cases are not a claim that CI passed |
+| [CI checks on `b3c7cea`](https://github.com/samir-sah/shipyard/actions/runs/41651700848) | Passed: clean install, type checks, all 37 unit tests, production build and Compose validation |
+| M4 PostgreSQL/Redis/S3/Docker CI | All 40 integration tests passed without skips; setup generated credentials, both images built, and API/worker startup returned healthy |
 | Public Git recipe, browser, production TLS/proxy, performance | Not verified in this snapshot |
 
-The final run may add checks and replace this snapshot. Auth, webhook, host-routing and retention implementation should be assessed against the actual final CI result. Integration maintenance operations use random isolated schemas; no existing development artifacts were deliberately purged. No external production deployment or capacity measurement has been performed.
+CI verified account/project isolation, session boundaries, signed raw-body delivery handling and persistent deduplication, project secret rotation, host routing, protected retention/tombstone recovery, migration preservation, and all earlier crash/retry scenarios. Retention fixtures used random isolated database schemas; other integration fixtures used unique IDs in disposable services. Generated local credentials were also checked absent from 33 build files, and `.env` is ignored by Git. A complete public Git recipe, browser interaction, real HTTPS/reverse-proxy deployment and capacity measurements remain unverified. All four planned implementation milestones are present; these are remaining verification and operational work, not production guarantees.
 
 ## Dependency decisions and official references
 
