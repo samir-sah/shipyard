@@ -115,10 +115,11 @@ Milestone 3 checks actually run so far:
 | `npm run typecheck` | Passed dashboard, server, scripts and test type checking |
 | `npm test` | 25 passed, 0 failed, 1 skipped because Windows denied symlink creation |
 | `npm run build` / `docker compose config --quiet` | Both passed |
-| Milestone 3 PostgreSQL/Redis/S3/Docker integration | Pending CI verification; no result claimed here |
+| [CI checks on `276bc80`](https://github.com/samir-sah/shipyard/actions/runs/41610083468) | Passed: clean install, type checks, all 26 unit tests, production build and Compose validation |
+| Milestone 3 PostgreSQL/Redis/S3/Docker integration | All 32 tests passed with no skips; platform/builder images built and API/worker startup returned healthy |
 | Public Git recipe, browser interaction, performance | Not verified by the milestone 3 focused checks |
 
-The new crash tests pause actual S3 upload or completion-marker handling and terminate a child worker, then exercise lease recovery and publication fencing. Docker resource inspection/janitor tests require `RUN_DOCKER_TESTS=1`. Their presence does not claim a passing run; record results only after execution. The existing milestone 2 CI image/readiness evidence above remains historical.
+The passing CI crash tests paused actual S3 upload or completion-marker handling and terminated a child worker with SIGKILL, then verified recovery on a new claim and preservation of the deployment ID. Additional checks verified heartbeat cancellation, stale-token rejection, retry limits, isolated Redis duplicate/retained/lost-job reconciliation, migration preservation, and paginated attempt-only cleanup. Docker checks inspected CPU/memory/swap/PID settings, verified an autonomous timeout, preserved live-claim resources, and removed expired-claim containers, volumes and workspaces. These checks used a prepared fixture builder with real orchestration, PostgreSQL and S3; a full public Git recipe, browser interactions, hostile-code isolation and capacity remain unverified.
 
 Measure first queue wait, deployment elapsed time, per-attempt intervals, retry/recovery delay, throughput, failures, and concurrency on recorded hardware. `buildDurationMs` now includes retry wait and downtime between first claim and terminal completion; it is not a CPU-build measurement. Do not infer capacity from configuration defaults or test durations.
 
