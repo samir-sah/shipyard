@@ -8,8 +8,9 @@ import type { ArtifactManifest, Deployment, DeploymentClaim, DeploymentLog, Proj
 export const pool = new pg.Pool({ connectionString: config.databaseUrl, max: 10, connectionTimeoutMillis: 5_000, statement_timeout: 10_000 });
 pool.on('error', error => console.error('PostgreSQL pool error', error));
 
-export const projectColumns = `id, name, slug, repo_url AS "repoUrl", branch, active_deployment_id AS "activeDeploymentId", created_at AS "createdAt"`;
-export const deploymentColumns = `id, project_id AS "projectId", status, commit_sha AS "commitSha", created_at AS "createdAt", started_at AS "startedAt", finished_at AS "finishedAt", error, log_truncated AS "logTruncated", attempt_count AS "attemptCount", CASE WHEN started_at IS NULL THEN NULL ELSE (extract(epoch FROM (started_at - created_at)) * 1000)::float8 END AS "queueWaitMs", CASE WHEN finished_at IS NULL OR started_at IS NULL THEN NULL ELSE (extract(epoch FROM (finished_at - started_at)) * 1000)::float8 END AS "buildDurationMs"`;
+export const legacyOwnerId = '00000000-0000-4000-8000-000000000001';
+export const projectColumns = `id, name, slug, repo_url AS "repoUrl", branch, active_deployment_id AS "activeDeploymentId", owner_id AS "ownerId", webhook_enabled AS "webhookEnabled", created_at AS "createdAt"`;
+export const deploymentColumns = `id, project_id AS "projectId", status, commit_sha AS "commitSha", created_at AS "createdAt", started_at AS "startedAt", finished_at AS "finishedAt", error, log_truncated AS "logTruncated", attempt_count AS "attemptCount", retained, artifact_state AS "artifactState", CASE WHEN started_at IS NULL THEN NULL ELSE (extract(epoch FROM (started_at - created_at)) * 1000)::float8 END AS "queueWaitMs", CASE WHEN finished_at IS NULL OR started_at IS NULL THEN NULL ELSE (extract(epoch FROM (finished_at - started_at)) * 1000)::float8 END AS "buildDurationMs"`;
 
 async function transaction<T>(run: (client: pg.PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
@@ -163,16 +164,22 @@ export async function markAttemptCleaned(token: string): Promise<void> {
   await pool.query("UPDATE build_attempts SET last_cleanup_at = clock_timestamp() WHERE token = $1 AND status IN ('failed', 'expired')", [token]);
 }
 
-export async function createDeployment(projectId: string): Promise<Deployment | null> {
+async function insertDeployment(client: pg.PoolClient, projectId: string, commitSha: string | null): Promise<Deployment> {
+  const generation = await client.query<{ publish_generation: string }>('UPDATE projects SET publish_generation = publish_generation + 1 WHERE id = $1 RETURNING publish_generation', [projectId]);
+  const result = await client.query<Deployment>(`INSERT INTO deployments(id, project_id, publish_generation, commit_sha) VALUES ($1, $2, $3, $4) RETURNING ${deploymentColumns}`, [randomUUID(), projectId, generation.rows[0].publish_generation, commitSha]);
+  return result.rows[0];
+}
+
+export async function createDeployment(projectId: string, commitSha: string | null = null): Promise<Deployment | null> {
+  if (commitSha !== null && !/^[a-f0-9]{40}$/.test(commitSha)) throw new Error('Invalid deployment commit');
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const project = await client.query('SELECT id FROM projects WHERE id = $1 FOR UPDATE', [projectId]);
     if (!project.rowCount) { await client.query('COMMIT'); return null; }
-    const generation = await client.query<{ publish_generation: string }>('UPDATE projects SET publish_generation = publish_generation + 1 WHERE id = $1 RETURNING publish_generation', [projectId]);
-    const result = await client.query<Deployment>(`INSERT INTO deployments(id, project_id, publish_generation) VALUES ($1, $2, $3) RETURNING ${deploymentColumns}`, [randomUUID(), projectId, generation.rows[0].publish_generation]);
+    const deployment = await insertDeployment(client, projectId, commitSha);
     await client.query('COMMIT');
-    return result.rows[0];
+    return deployment;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -207,7 +214,7 @@ export async function rollbackDeployment(projectId: string, deploymentId: string
     await client.query('BEGIN');
     const project = await client.query('SELECT id FROM projects WHERE id = $1 FOR UPDATE', [projectId]);
     if (!project.rowCount) { await client.query('COMMIT'); return null; }
-    const target = await client.query("SELECT id FROM deployments WHERE id = $1 AND project_id = $2 AND status = 'deployed' AND (artifact_manifest IS NULL OR artifact_manifest = $3::jsonb) FOR UPDATE", [deploymentId, projectId, JSON.stringify(manifest)]);
+    const target = await client.query("SELECT id FROM deployments WHERE id = $1 AND project_id = $2 AND status = 'deployed' AND artifact_state = 'available' AND (artifact_manifest IS NULL OR artifact_manifest = $3::jsonb) FOR UPDATE", [deploymentId, projectId, JSON.stringify(manifest)]);
     if (!target.rowCount) { await client.query('COMMIT'); return null; }
     await client.query('UPDATE deployments SET artifact_manifest = coalesce(artifact_manifest, $2::jsonb) WHERE id = $1', [deploymentId, JSON.stringify(manifest)]);
     const result = await client.query<Project>(`UPDATE projects SET publish_generation = publish_generation + 1, active_deployment_id = $2 WHERE id = $1 RETURNING ${projectColumns}`, [projectId, deploymentId]);
@@ -217,4 +224,73 @@ export async function rollbackDeployment(projectId: string, deploymentId: string
     await client.query('ROLLBACK');
     throw error;
   } finally { client.release(); }
+}
+
+export async function setDeploymentRetained(projectId: string, id: string, retained: boolean): Promise<Deployment | null> {
+  return transaction(async client => {
+    const project = await client.query('SELECT id FROM projects WHERE id = $1 FOR UPDATE', [projectId]);
+    if (!project.rowCount) return null;
+    await client.query('SELECT id FROM deployments WHERE id = $1 FOR UPDATE', [id]);
+    const result = await client.query<Deployment>(`UPDATE deployments SET retained = $3 WHERE id = $1 AND project_id = $2 AND status = 'deployed' AND artifact_state = 'available' RETURNING ${deploymentColumns}`, [id, projectId, retained]);
+    return result.rows[0] ?? null;
+  });
+}
+
+export async function configureWebhook(projectId: string, ownerId: string, enabled: boolean): Promise<{ project: Project; keyVersion: number } | null> {
+  return transaction(async client => {
+    const project = await client.query('SELECT id FROM projects WHERE id = $1 AND owner_id = $2 FOR UPDATE', [projectId, ownerId]);
+    if (!project.rowCount) return null;
+    const result = await client.query<Project & { keyVersion: number }>(`UPDATE projects SET webhook_enabled = $2, webhook_key_version = webhook_key_version + 1 WHERE id = $1 RETURNING ${projectColumns}, webhook_key_version AS "keyVersion"`, [projectId, enabled]);
+    const { keyVersion, ...configured } = result.rows[0];
+    return { project: configured, keyVersion };
+  });
+}
+
+export async function acceptWebhook(projectId: string, keyVersion: number, deliveryId: string, payloadHash: string, eventType: string, commitSha: string | null): Promise<{ duplicate: boolean; deploymentId: string | null } | 'conflict' | 'disabled' | null> {
+  if (commitSha !== null && !/^[a-f0-9]{40}$/.test(commitSha)) throw new Error('Invalid deployment commit');
+  return transaction(async client => {
+    const project = await client.query<{ webhook_enabled: boolean; webhook_key_version: number }>('SELECT webhook_enabled, webhook_key_version FROM projects WHERE id = $1 FOR UPDATE', [projectId]);
+    if (!project.rowCount) return null;
+    if (!project.rows[0].webhook_enabled || project.rows[0].webhook_key_version !== keyVersion) return 'disabled';
+    const existing = await client.query<{ payload_hash: string; event_type: string; deployment_id: string | null }>('SELECT payload_hash, event_type, deployment_id FROM webhook_deliveries WHERE project_id = $1 AND delivery_id = $2', [projectId, deliveryId]);
+    if (existing.rowCount) {
+      const delivery = existing.rows[0];
+      if (delivery.payload_hash !== payloadHash || delivery.event_type !== eventType) return 'conflict';
+      return { duplicate: true, deploymentId: delivery.deployment_id };
+    }
+    const deployment = commitSha === null ? null : await insertDeployment(client, projectId, commitSha);
+    await client.query('INSERT INTO webhook_deliveries(project_id, delivery_id, payload_hash, event_type, deployment_id) VALUES ($1, $2, $3, $4, $5)', [projectId, deliveryId, payloadHash, eventType, deployment?.id ?? null]);
+    return { duplicate: false, deploymentId: deployment?.id ?? null };
+  });
+}
+
+const retentionEligible = `d.status = 'deployed' AND d.artifact_state = 'available' AND NOT d.retained
+  AND p.active_deployment_id IS DISTINCT FROM d.id
+  AND d.finished_at < clock_timestamp() - $1 * interval '1 day'
+  AND d.id NOT IN (SELECT recent.id FROM deployments recent WHERE recent.project_id = d.project_id AND recent.status = 'deployed'
+    ORDER BY recent.finished_at DESC NULLS LAST, recent.id DESC LIMIT $2)`;
+
+export async function claimArtifactDeletions(limit = 10): Promise<Array<{ deploymentId: string }>> {
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new Error('Retention limit must be a positive integer');
+  const batchSize = Math.min(limit, 100);
+  return transaction(async client => {
+    const existing = await client.query<{ deploymentId: string }>("SELECT id AS \"deploymentId\" FROM deployments WHERE artifact_state = 'deleting' ORDER BY finished_at, id LIMIT $1", [batchSize]);
+    const claimed = [...existing.rows];
+    if (config.retentionDays <= 0 || claimed.length >= batchSize) return claimed;
+    const candidates = await client.query<{ id: string; project_id: string }>(`SELECT d.id, d.project_id FROM deployments d JOIN projects p ON p.id = d.project_id WHERE ${retentionEligible} ORDER BY d.finished_at, d.id LIMIT $3`, [config.retentionDays, config.retentionKeep, batchSize - claimed.length]);
+    for (const candidate of candidates.rows) {
+      const project = await client.query('SELECT id FROM projects WHERE id = $1 FOR UPDATE SKIP LOCKED', [candidate.project_id]);
+      if (!project.rowCount) continue;
+      await client.query('SELECT id FROM deployments WHERE id = $1 FOR UPDATE', [candidate.id]);
+      const eligible = await client.query(`SELECT 1 FROM deployments d JOIN projects p ON p.id = d.project_id WHERE d.id = $3 AND ${retentionEligible}`, [config.retentionDays, config.retentionKeep, candidate.id]);
+      if (!eligible.rowCount) continue;
+      await client.query("UPDATE deployments SET artifact_state = 'deleting' WHERE id = $1", [candidate.id]);
+      claimed.push({ deploymentId: candidate.id });
+    }
+    return claimed;
+  });
+}
+
+export async function finishArtifactDeletion(id: string): Promise<void> {
+  await pool.query("UPDATE deployments SET artifact_state = 'deleted' WHERE id = $1 AND artifact_state = 'deleting'", [id]);
 }

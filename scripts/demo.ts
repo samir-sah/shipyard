@@ -10,10 +10,12 @@ const { values } = parseArgs({ options: {
 } });
 if (Boolean(values.repo) === Boolean(values.project)) throw new Error('Provide exactly one of --repo URL or --project ID');
 const base = values.base!.replace(/\/$/, '');
+const accessToken = process.env.SHIPYARD_TOKEN;
+if (!accessToken) throw new Error('Set SHIPYARD_TOKEN to your operator access token before running the demo');
 async function api<T>(path: string, body?: unknown): Promise<T> {
   const response = await fetch(`${base}${path}`, {
     method: body === undefined ? 'GET' : 'POST',
-    headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${accessToken}`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(15_000),
   });
   const result = await response.json();

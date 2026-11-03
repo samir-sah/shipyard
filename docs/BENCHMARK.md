@@ -21,6 +21,8 @@ Use the trusted small Vite fixture from `DEMO.md`. First measure one cold build 
 
 Start at `WORKER_CONCURRENCY=1`, `BUILD_CPUS=1`, `BUILD_MEMORY_MB=512`, `BUILD_PIDS=128`, `BUILD_TIMEOUT_MS=300000`, `WORKER_LEASE_MS=30000`, and `MAX_BUILD_ATTEMPTS=3`. Queue several deployments; record successful completions, terminal failures, failed/expired attempts, and wall-clock elapsed time separately. Increase concurrency only after checking host memory and CPU capacity. For each setting, state worker-process count, queue depth, submission rate, samples, warmups, and other active processes.
 
+Run `npm run setup` before starting the platform and use an explicit private `SHIPYARD_TOKEN` for the demo helper. Record whether submission uses bearer API requests, browser sessions or signed webhooks, the number of configured users/projects, dashboard/site origins and whether HTTPS/proxy overhead is included. Never include actual tokens, session keys or webhook secrets in benchmark output. Leave new retention disabled for build comparisons, or record its settings and concurrent GC workload separately.
+
 ```sh
 docker stats --no-stream
 docker compose logs worker
@@ -35,6 +37,10 @@ Successful retained builds remain distinct from activation. Several deployments 
 `WORKER_CONCURRENCY` limits one worker process's active jobs. It does not establish a global machine limit. After lease loss, an orphaned container can overlap a replacement until its autonomous timeout or cleanup. Record observed simultaneous containers and peak host load during recovery, plus how long abandoned resources take to disappear. The container's autonomous deadline and per-container limits bound individual work; they do not prove that the machine supports a configured aggregate concurrency.
 
 Measure restore separately from builds: record the target version's file count/bytes, remote validation latency, total request latency, and whether builds were running concurrently. Restore reads and hashes the full target version before committing the pointer change, so its cost depends on artifact size and storage behavior. No restore latency has been measured here.
+
+Measure webhook acceptance separately from build completion: record valid unique deliveries, duplicate deliveries, rejected conflicts/signatures, acceptance latency and deployments actually created. A repeated delivery is not another successful deployment. Push SHAs are pinned at acceptance, while accepted transaction order does not prove GitHub head freshness.
+
+For a retention workload, use dedicated disposable fixtures in an isolated schema/storage namespace. Record available/deleting/deleted counts, protected active/Keep/newest versions, eligible files/bytes, deletion duration and resumed tombstones. Do not turn on retention or backdate real development deployments to obtain measurements. Host routing, session isolation, ownership and retention correctness checks are functional evidence, not throughput or capacity measurements.
 
 ## Results template
 
@@ -56,6 +62,8 @@ Measure restore separately from builds: record the target version's file count/b
 | Successful throughput, deployments/minute | Unmeasured |
 | Activation throughput, releases/minute | Unmeasured |
 | Restore samples/bytes/files and median/p95 latency | Unmeasured |
+| Webhook unique/duplicate/rejected deliveries and acceptance median/p95 | Unmeasured |
+| Retention eligible/protected versions, bytes removed and cleanup latency | Unmeasured |
 | Peak memory/CPU and observed limit failures | Unmeasured |
 
 Compute successful throughput from terminal successful deployments divided by measured wall-clock time. Count terminal failures and failed/expired attempts separately. Do not call configured concurrency “supported concurrency” until sustained runs complete under recorded host limits. Queue/request growth and checkout/npm disk usage remain unbounded by platform quotas and must be observed during the workload.
@@ -74,8 +82,12 @@ Milestone 3 feature draft, subject to the recorded recovery tests:
 
 > Added PostgreSQL worker leases and attempt-token publication fencing, bounded retries, isolated artifact attempts, and cleanup of abandoned build resources.
 
+Milestone 4 feature draft, subject to its actual final checks:
+
+> Added owner-scoped management with signed sessions, project-specific verified GitHub deliveries, separate project origins, and guarded retention that preserves active and explicitly kept rollback versions.
+
 Measurement draft; replace every placeholder from collected evidence before use:
 
 > Completed [successful deployments]/[submitted deployments] Vite deployments using [worker processes/concurrency] on [hardware], with [median/p95] first queue wait and [median/p95] deployment elapsed time, including [failed/expired attempts] under [CPU/memory/time] limits.
 
-Describe rollback, ordering, and worker-recovery verification using actual recorded scenarios. The recovery harness uses a fake builder with real persistence/storage; it is not public Git build throughput evidence. Hostile-code isolation, production reliability, performance, and supported concurrency remain unproven. Do not replace unmeasured placeholders with configuration defaults or test durations.
+Describe rollback, ordering, recovery, ownership, webhooks and retention using actual recorded scenarios. The recovery harness uses a fake builder with real persistence/storage; it is not public Git build throughput evidence. All four feature milestones are implemented; remaining portfolio work is reproducible demonstration and measurement. Hostile-code isolation, production reliability, performance and supported concurrency remain unproven. Do not replace placeholders with configuration defaults or test durations.

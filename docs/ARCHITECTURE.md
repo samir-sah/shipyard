@@ -3,7 +3,8 @@
 ```mermaid
 flowchart LR
   User[Browser] --> Dashboard[React dashboard]
-  Dashboard --> API[Express API]
+  Dashboard -->|signed session / bearer key| API[Owner-scoped Express API]
+  GitHub[GitHub webhook] -->|project HMAC + delivery ID| API
   API --> PG[(PostgreSQL)]
   API --> Queue[(Redis / BullMQ)]
   Queue --> Worker[TypeScript worker]
@@ -13,20 +14,22 @@ flowchart LR
   Builder --> Validate[Validate dist tree]
   Validate --> S3[(Immutable S3 files + completion manifest)]
   Worker -->|guarded activation after validation| PG
-  User -->|/sites/slug/| API
+  User -->|project site host| API
   API -->|active version| PG
   API -->|302 to pinned version URL| User
-  User -->|/versions/slug/id/| API
+  User -->|/_shipyard/v/id/| API
   API -->|read version objects| S3
+  Worker -->|guarded retention claims| PG
+  Worker -->|delete claimed obsolete versions| S3
 ```
 
 ## Deployment lifecycle
 
-1. The API validates a project name and public HTTPS GitHub URL. Repository credentials, arbitrary build commands, branch names, and output paths are not user inputs in this version.
+1. The API authenticates a configured identity, validates a project name/public HTTPS GitHub URL, and persists its owner. Every management route scopes projects to that owner. Repository credentials, arbitrary build commands, branch names, and output paths are not user inputs.
 2. PostgreSQL locks the project row, advances its publication generation, and creates a stable deployment ID in `queued` state with that generation. BullMQ jobs use `<deployment-id>-<expected-attempt>`. A dispatcher reconstructs ready queued work from PostgreSQL when scheduling did not complete.
 3. A worker atomically claims the matching expected attempt as `building`, creates a UUID token, and records an expiring lease and a `build_attempts` row. Duplicate or stale deliveries cannot bypass the database's expected-attempt, status, retry-time, and attempt-limit checks.
 4. The worker creates a token-specific Docker container and named `/work` volume with management labels and fixed image/commands. Checkout and build run inside that container. Platform database/S3 credentials and the Docker socket are not passed to it.
-5. After the Docker build finishes and output is copied, the current lease holder records the Git SHA before upload. The worker validates `dist`, requires `index.html`, rejects unsupported entries and the reserved manifest name, and enforces file-count and byte limits. Files go under `deployments/<deployment-id>/attempts/<token>/` with conditional `If-None-Match: *` writes. The worker reads each uploaded object back and checks its actual byte length and SHA-256.
+5. After the Docker build finishes and output is copied, the current lease holder records the Git SHA before upload. Webhook deployments already have their verified payload SHA pinned at creation. The worker validates `dist`, requires `index.html`, rejects unsupported entries, secret-looking paths and the reserved manifest name, and enforces file-count and byte limits. Files go under `deployments/<deployment-id>/attempts/<token>/` with conditional `If-None-Match: *` writes. The worker reads each uploaded object back and checks its actual byte length and SHA-256.
 6. After every file passes, the worker writes `__shipyard_manifest.json` last, also without overwrite. New manifests contain `attemptId` and `commitSha` in addition to the deployment ID, file keys, sizes, SHA-256 values, and total bytes. A partial prefix without this marker is not a complete new version.
 7. After normal build-resource cleanup, a transaction locks the project and deployment, checks the current unexpired claim token and pinned commit, changes the deployment from `building` to `deployed`, and stores the selected attempt's manifest. It changes the active pointer only if the project's generation still matches. A superseded successful build remains retained. A failed attempt preserves the pointer and either queues a bounded retry or ends the deployment as `failed`.
 8. The active site route selects a deployment once and redirects to its immutable version path. Subsequent relative asset requests stay pinned to that version even when the active pointer changes.
@@ -49,13 +52,13 @@ Each attempt owns `shipyard-<deployment-id>-<token>`, `shipyard-work-<token>`, a
 
 On startup and every 60 seconds, maintenance inspects bounded batches: at most 100 labeled containers, 100 labeled volumes, 100 local temporary directories, and 10 failed/expired artifact attempts per pass. Current live claims are preserved. S3 cleanup excludes the attempt selected by the deployment's committed manifest; it never deletes completed retained versions. Failed/expired attempts rotate by their last cleanup time, become eligible again after 60 seconds, and can be revisited to remove late writes from an obsolete process.
 
-Cleanup is eventual and best effort, with no fixed completion deadline under backlog or infrastructure failure. A worker can inspect its Docker daemon's labeled resources, but cannot delete another host's local temporary directory. Pre-milestone-3 unlabeled resources need separate operator review. Retention of successful versions remains milestone 4.
+Cleanup is eventual and best effort, with no fixed completion deadline under backlog or infrastructure failure. A worker can inspect its Docker daemon's labeled resources, but cannot delete another host's local temporary directory. Pre-milestone-3 unlabeled resources need separate operator review. Successful-version retention uses the separate guarded state machine below.
 
 ## Publication ordering and rollback
 
 The policy is **latest requested build**, not latest successful completion. Deployment creation advances the project generation immediately. If A starts, B is requested, and B fails, a later successful completion of A is retained but cannot replace the existing active site. This avoids publishing an earlier request after the operator has requested a newer one.
 
-Restore accepts only a `deployed` version belonging to the project. Before changing database state, it compares the completion manifest with the manifest saved in PostgreSQL and rechecks every listed object's actual SHA-256 and size. A changed marker, missing object, corrupt object, or invalid manifest rejects restore without changing the active selection. Legacy milestone 1 versions have an explicit compatibility path described below.
+Restore accepts only a `deployed`, artifact-`available` version belonging to the owned project. Before changing database state, it compares the completion manifest with the manifest saved in PostgreSQL and rechecks every listed object's actual SHA-256 and size. A changed marker, missing object, corrupt object, or invalid manifest rejects restore without changing the active selection. The transaction checks availability again, so retention cannot race a target back into use. Legacy milestone 1 versions have an explicit compatibility path below.
 
 Once validation succeeds, the rollback transaction locks the project row, checks the target again, advances the project generation, and updates the active pointer. Earlier queued or running builds may finish, upload, and remain in history, but their older generations cannot publish. A deployment requested after rollback receives a newer generation and may publish normally.
 
@@ -63,7 +66,7 @@ Deployment creation, activation, and rollback serialize through the same Postgre
 
 ## Persistence boundaries
 
-PostgreSQL is authoritative. Redis AOF retains queue data, but the queue is not the deployment-history database. Object storage is separate from both. Named volumes persist all three local services. No backup or retention guarantee is implemented.
+PostgreSQL is authoritative. Redis AOF retains queue data, but the queue is not the deployment-history database. Object storage is separate from both. Named volumes persist all three local services. Artifact retention is optional; backups and consistent recovery remain operator responsibilities.
 
 Per-attempt immutable prefixes and a completion marker prevent an incomplete or obsolete attempt from becoming a served version. PostgreSQL's committed manifest selects the attempt prefix used for reads and rollback. Older manifests without an `attemptId` continue to select the legacy `deployments/<deployment-id>/` root. The database manifest is recorded only after the marker exists. This is a publication boundary, not a transaction spanning PostgreSQL and S3: a crash can leave complete or partial unused objects before database completion.
 
@@ -75,7 +78,9 @@ Migration `002_version_selection.sql` adds generation columns and a nullable dep
 
 Migration `003_worker_claims.sql` adds claim/expiry/retry fields, attempt counts, and `build_attempts`. After both old application processes have stopped, old `building` rows are requeued with an upgrade note. Existing completed history, active pointers, and root-prefix manifests are preserved. No old tokenless process may overlap the new worker.
 
-| Existing data | Milestone 3 behavior |
+Migration `004_ownership_webhooks_retention.sql` adds immutable-by-API project ownership, webhook configuration/delivery metadata, and artifact retention state. Existing projects receive owner ID `00000000-0000-4000-8000-000000000001`, matching setup's bootstrap identity. Existing artifacts default to available/unkept; disabled retention creates no deletion claims. Existing history, manifests, IDs and active pointers remain.
+
+| Existing data | Current behavior |
 | --- | --- |
 | Project and deployment history | Preserved; no destructive reset |
 | Active deployment pointer | Preserved, including serving its existing version |
@@ -84,6 +89,8 @@ Migration `003_worker_claims.sql` adds claim/expiry/retry fields, attempt counts
 | Milestone 2 root-prefix manifest | Read and rollback continue using the root prefix |
 | Old `building` deployment after coordinated stop | Requeued by migration 003; history and first-start timestamp retained |
 | Newly completed milestone 3 deployment | Reads the selected token prefix in its committed manifest |
+| Project predating ownership | Assigned to the configured bootstrap owner by migration 004 |
+| Successful version predating retention | Available by default; age/count deletion stays disabled until configured |
 | Missing legacy index or altered remaining legacy objects | Restore rejected; active pointer and generation unchanged |
 | Additive columns after application downgrade | Left intact; no automatic database downgrade |
 
@@ -97,18 +104,44 @@ An application downgrade is not transparent: milestone 1/2 readers cannot locate
 
 ## Build threat model
 
-This is a local, single-operator demo for trusted repositories. A public repository is not inherently trustworthy. `npm ci` can execute install scripts, and `npm run build` executes repository code.
+This platform accepts configured operators and trusted repositories. A public repository is not inherently trustworthy. `npm ci` can execute install scripts, and `npm run build` executes repository code. Operator authentication does not make submitted code safe.
 
 Default per-attempt limits are 1 CPU, 512 MiB memory, 128 PIDs, and 300 seconds for resource creation, checkout, build, output copy, and upload, with worker concurrency 1. Lease cancellation or the deadline aborts Docker CLI and upload work. Synchronous/local validation and final cleanup can extend total attempt wall time, and retry waits/downtime extend total deployment time. Output limits are 64 MiB and 5,000 files; persisted logs are capped at 1 MiB per deployment across attempts. Verify Docker's host-kernel resource support before relying on configured bounds. No measured capacity is implied.
 
 Build containers receive no platform secrets or Docker socket. The worker needs the Docker socket to create them and therefore has privileged control over the Docker host. Run this platform on a dedicated development host. Builds can access the network; there is no hostile-code network isolation, VM boundary, checkout-size quota, or dependency disk quota. Deployment requests can grow the database/queue without a submission quota. Container resource limits alone do not prove a secure sandbox.
 
-The API has no authentication or ownership checks through milestone 3. Compose exposes its ports only on loopback. Do not publish this configuration to an untrusted network.
+Compose exposes development ports only on loopback. Management routes require authentication and ownership, but a manually exposed installation still needs HTTPS, separate site domains, restricted infrastructure access and monitoring. API authentication/webhook master keys are not passed to the worker or build containers. `.env`, `.env.*` and `.git` artifact paths are rejected; arbitrary secrets in compiled JavaScript or log text cannot be reliably detected. See [deployment](DEPLOYMENT.md).
 
 ## Browser serving boundary
 
-`/sites/<slug>/` responds with a `302` and `Cache-Control: no-store`, targeting `/versions/<slug>/<deployment-id>/`. Version URLs never follow a later active-pointer change. The document and relative assets therefore come from the same deployment during a release or restore.
+`SITE_BASE_URL=http://sites.localhost:3000` produces `http://<slug>.sites.localhost:3000/`. Host routing uses the raw `Host` header and ignores `X-Forwarded-Host`. A project host rewrites only static-site paths internally; API, session and health endpoints are unreachable there, and non-read requests are rejected. Unknown hosts return 404. The root responds with a non-cacheable redirect to `/_shipyard/v/<deployment-id>/`. Relative assets stay pinned across active-pointer changes.
 
-Because those paths share the dashboard host, deployed documents receive a Content Security Policy sandbox without `allow-same-origin`. Static asset responses permit cross-origin loading so sandboxed JavaScript modules can load. The deployed document cannot use dashboard cookies, local storage, service workers, or same-origin browser APIs.
+Project hosts have normal origins, distinct from the dashboard and other projects. Versions within one project share that origin and local storage. Service workers can register under their version path; no header grants broader scope. For public operation, use HTTPS and a site base on a different registrable domain from the dashboard, with a reverse proxy preserving `Host`.
 
-Repositories must build relative asset URLs. Extensionless version paths fall back to `index.html`; missing paths with file extensions return 404. Client-side routers need the immutable version base, and relative assets need care on nested routes. Hash routing is the simplest supported choice. Separate origins, host-based routing, and a new browser-isolation review belong to milestone 4.
+Dashboard-host `/sites/<slug>/` still redirects to `/versions/<slug>/<id>/` as a local fallback. Those shared-host documents retain an opaque-origin CSP sandbox without `allow-same-origin`; cookies, local storage and service workers are unavailable. Anonymous CORS permits their module assets to load. The dashboard has its own CSP, including frame-ancestor restrictions.
+
+Repositories must emit relative assets. Extensionless version paths fall back to `index.html`; missing extension-bearing paths return 404. History routers need the version basename and correctly resolved assets; hash routing is simplest. Deleting/deleted version artifacts return 410 on either serving route. Published sites are intentionally public, including pinned versions until retention expires them.
+
+## Authentication and ownership
+
+`AUTH_USERS` supplies UUID/name/access-token entries from private operator configuration. Tokens are random bearer secrets, not human passwords. There is no signup, password reset, SSO, user database or ownership-transfer UI. Setup generates the bootstrap identity and missing secrets while preserving existing nonempty values.
+
+Browser login exchanges the access token for an eight-hour HMAC-signed session containing identity, expiry and a token-derived key ID. Cookies are HttpOnly, SameSite=Strict and host-only. HTTPS dashboard configuration selects a Secure `__Host-shipyard_session` cookie; localhost development HTTP uses `shipyard_session`. Verification checks the current configured user/token as well as the session signature, so token rotation, removal or a global session-key change revokes sessions after API restart. Programmatic clients use the bearer token directly.
+
+Owner checks protect project listing, build creation, logs/history, restore, Keep and webhook setup. Cross-origin mutations and non-JSON management writes are rejected. Webhook ingress uses its independent raw-body signature boundary. Published artifacts are not an authenticated file-sharing mechanism.
+
+## Signed deliveries
+
+The API derives a project secret using `GITHUB_WEBHOOK_KEY`, project ID and monotonically increasing webhook key version. Enable/rotate/disable updates configuration under the project lock. Only the owning identity can configure it; the derived secret is returned at that action, not in project listings. The API-only master key is never shared with GitHub or build containers.
+
+Ingress accepts at most 1 MiB of raw JSON, verifies `X-Hub-Signature-256` with a timing-safe HMAC comparison, then validates repository identity and push fields. A live `refs/heads/main` push pins its `after` SHA. Ping, other branches and deleted refs record accepted deliveries without scheduling a build. See GitHub's [signature guidance](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries).
+
+`webhook_deliveries` has a project/delivery-ID primary key. Under the project lock, acceptance rechecks enabled/key-version state, rejects conflicting body hash/event reuse, and atomically inserts the delivery plus any queued deployment and generation increment. Duplicate delivery returns its original deployment. Queue enqueueing is recoverable from PostgreSQL. Rotation racing acceptance is ordered by that lock. This is idempotence, not a guarantee that arrival order matches GitHub commit chronology: a late older push accepted later receives the newer publication generation.
+
+## Successful-version retention
+
+`RETENTION_DAYS=0` disables new deletion claims. Positive values permit only successful available versions older than that age, excluding the active pointer, manual Keep flag and `RETENTION_KEEP` newest successful versions by finish time/ID. The keep count defaults to five and must be at least one. Build history and log records are retained.
+
+A bounded claim transaction locks the project before the target deployment and rechecks eligibility, then marks it `deleting`. Restore and Keep use the same lock order and require `available`, preventing deletion/restore races. Storage work happens after the transaction: the worker deletes only that deployment prefix and marks it `deleted` on success. Already claimed deletion jobs resume even when new retention is disabled; the claim has passed the point where preservation can be promised. Failed storage deletion leaves a tombstone to retry.
+
+There is no undelete operation or automatic backup restoration. A worker crash between object deletion and the final database update can leave `deleting` until an idempotent retry finishes. Operators must protect rollback versions with Keep before they become eligible and maintain separate backups. Integration retention operations use isolated schemas so development projects are not deletion fixtures.

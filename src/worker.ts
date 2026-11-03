@@ -5,7 +5,7 @@ import { connectionOptions, queueName, queue, dispatchQueued } from './queue.js'
 import { ensureBucket, s3 } from './storage.js';
 import { requireUuid } from './validation.js';
 import { deploy } from './deployment.js';
-import { cleanupBuildResources } from './cleanup.js';
+import { cleanupBuildResources, cleanupRetainedArtifacts } from './cleanup.js';
 
 await migrate();
 await ensureBucket();
@@ -33,7 +33,10 @@ const cleanupController = new AbortController();
 let cleaning: Promise<void> | undefined;
 function clean(): Promise<void> {
   if (cleaning) return cleaning;
-  cleaning = cleanupBuildResources(cleanupController.signal).catch(error => { if (!cleanupController.signal.aborted) console.error('Cleanup failed', error); }).finally(() => { cleaning = undefined; });
+  cleaning = (async () => {
+    await cleanupBuildResources(cleanupController.signal);
+    await cleanupRetainedArtifacts(cleanupController.signal);
+  })().catch(error => { if (!cleanupController.signal.aborted) console.error('Cleanup failed', error); }).finally(() => { cleaning = undefined; });
   return cleaning;
 }
 await dispatch();

@@ -1,8 +1,8 @@
 import { readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
-import { isClaimActive, listAbandonedAttempts, markAttemptCleaned } from './db.js';
-import { deleteAttemptArtifacts } from './storage.js';
+import { isClaimActive, listAbandonedAttempts, markAttemptCleaned, claimArtifactDeletions, finishArtifactDeletion } from './db.js';
+import { deleteAttemptArtifacts, deleteDeploymentArtifacts } from './storage.js';
 import { runCommand } from './process.js';
 
 const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
@@ -52,5 +52,15 @@ export async function cleanupBuildResources(signal?: AbortSignal): Promise<void>
     try { await deleteAttemptArtifacts(attempt.deploymentId, attempt.token, signal); }
     catch (error) { if (signal?.aborted) throw error; console.error('Abandoned artifact cleanup failed', attempt.token, error); }
     finally { await markAttemptCleaned(attempt.token); }
+  }
+}
+
+export async function cleanupRetainedArtifacts(signal?: AbortSignal): Promise<void> {
+  for (const version of await claimArtifactDeletions(10)) {
+    signal?.throwIfAborted();
+    try {
+      await deleteDeploymentArtifacts(version.deploymentId, signal);
+      await finishArtifactDeletion(version.deploymentId);
+    } catch (error) { if (signal?.aborted) throw error; console.error('Version retention cleanup failed', version.deploymentId, error); }
   }
 }

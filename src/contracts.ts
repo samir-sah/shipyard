@@ -16,6 +16,9 @@ export interface Project {
   repoUrl: string;
   branch: 'main';
   activeDeploymentId: string | null;
+  ownerId: string;
+  webhookEnabled: boolean;
+  siteUrl?: string;
   createdAt: string;
 }
 
@@ -32,6 +35,8 @@ export interface Deployment {
   buildDurationMs: number | null;
   logTruncated: boolean;
   attemptCount: number;
+  retained: boolean;
+  artifactState: 'available' | 'deleting' | 'deleted';
 }
 
 export interface DeploymentClaim {

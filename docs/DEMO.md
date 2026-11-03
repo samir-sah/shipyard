@@ -1,6 +1,6 @@
 # Reproducible demo
 
-This procedure exercises milestones 1–3. Actual results belong in `PLAN.md`; this guide is a runnable procedure, not evidence that every step has already passed. Upgrade an existing milestone 1/2 installation using the coordinated API/worker stop in the README before running it.
+This procedure exercises all four milestones. Actual results belong in `PLAN.md`; these steps are not evidence that they have already passed. Upgrade older installations using the coordinated API/worker stop and credential setup in the README. Retention stays disabled by default.
 
 ## Prepare a trusted public fixture
 
@@ -23,18 +23,19 @@ Publish that fixture to a public GitHub repository you control, preserving its l
 ## Successful deployment
 
 1. Start Shipyard using the README instructions. Confirm `docker compose ps` shows healthy backing services and running API/worker.
-2. Open `http://localhost:3000`, create a project with the trusted public fixture URL, and submit its deployment.
+2. Run `npm run setup`, open `http://localhost:3000`, and sign in with the private operator access token from your local `.env`. Create a project with the trusted public fixture URL.
 3. Follow the log panel through `queued`, `building`, and `deployed`. Record the deployment ID, commit, first queue wait, deployment elapsed time, attempt count, and configured limits. Attempt numbers appear in the logs; the history API includes `attemptCount`.
-4. Open the displayed `/sites/<slug>/` URL. Confirm it redirects to `/versions/<slug>/<deployment-id>/` and HTML, JavaScript, CSS, and relative assets load.
+4. Open the displayed `http://<slug>.sites.localhost:3000/` URL. Confirm it redirects to `/_shipyard/v/<deployment-id>/` and HTML, JavaScript, CSS and relative assets load. The dashboard-host `/sites/<slug>/` fallback still redirects to `/versions/<slug>/<id>/` under its opaque-origin sandbox.
 5. Save the project ID, slug, active deployment ID **A**, immutable version URL, and a checksum or screenshot of the rendered page. This is the baseline for the failure and restore tests.
 
 The helper automates submission, waits for completion, checks the served page, and prints timing. Add `--duplicate` to schedule the same ready expected attempt again. Job IDs include the stable deployment ID and expected attempt number. PostgreSQL claim checks remain authoritative even when duplicate queue delivery occurs; integration tests exercise those checks separately:
 
 ```sh
+export SHIPYARD_TOKEN='REPLACE_WITH_YOUR_PRIVATE_OPERATOR_KEY'
 npm run demo -- --repo https://github.com/YOUR-ACCOUNT/YOUR-FIXTURE.git --name "Vite demo" --duplicate
 ```
 
-Keep the printed project ID for later redeployments. `--base http://localhost:3000` overrides the API URL when necessary. Run this helper with no competing deployment/restore requests: its successful-run assertion expects its own deployment to become active. Its printed `buildDurationMs` is first-claim-to-terminal elapsed time, including retry wait/downtime. A demo-helper polling timeout is not proof that the persisted deployment failed; inspect history and logs.
+Replace that token placeholder; it is not a working credential. In PowerShell, set `$env:SHIPYARD_TOKEN` to the private operator key. The helper does not choose credentials automatically. Keep the printed project ID for later redeployments. `--base http://localhost:3000` overrides the dashboard API URL. Run with no competing deployment/restore requests: the successful-run assertion expects its own deployment to become active. Its printed `buildDurationMs` includes retry wait/downtime. A polling timeout is not proof of terminal failure; inspect history/logs. The helper checks the sandboxed fallback page; use the browser steps to inspect the project host.
 
 ## Failed build preserving the active site
 
@@ -64,6 +65,7 @@ The API alternative uses the project and deployment IDs printed earlier. Replace
 ```sh
 curl --fail-with-body --request POST \
   http://localhost:3000/api/projects/PROJECT-ID/rollback \
+  --header "Authorization: Bearer $SHIPYARD_TOKEN" \
   --header 'Content-Type: application/json' \
   --data '{"deploymentId":"DEPLOYMENT-A-ID"}'
 
@@ -78,12 +80,13 @@ In PowerShell, the equivalent restore request is:
 
 ```powershell
 $body = @{ deploymentId = 'DEPLOYMENT-A-ID' } | ConvertTo-Json
+$headers = @{ Authorization = "Bearer $env:SHIPYARD_TOKEN" }
 Invoke-RestMethod -Method Post `
   -Uri 'http://localhost:3000/api/projects/PROJECT-ID/rollback' `
-  -ContentType 'application/json' -Body $body
+  -Headers $headers -ContentType 'application/json' -Body $body
 ```
 
-Restore first verifies every stored object's actual SHA-256 and size against the completion manifest. An unavailable/incomplete version returns `409`; a missing, failed, or different project's deployment returns `404`. Neither changes active selection. A successful restore advances the project's generation, superseding all earlier queued/running builds. Such builds may finish as retained successful versions; they must not replace the restored site. A new build requested after restore can publish.
+Restore verifies every stored object's SHA-256/size against its saved manifest. A corrupt/unavailable stored object returns `409`; a missing, failed, deleting/deleted, or different project's target returns `404`. Neither changes active selection. A successful restore advances the generation, superseding earlier queued/running builds. They may finish as historical successful versions but must not replace the restored site. A later request can publish. Version reads return `410` after retention claims deletion.
 
 For an old milestone 1 successful version without a manifest, restore verifies its existing objects and lazily creates the marker and stored manifest. Existing history and active IDs are preserved during migration. Do not delete or modify storage objects to manufacture this situation on a project you want to keep; the integration suite creates isolated fixtures for compatibility and corruption cases.
 
@@ -107,6 +110,7 @@ Per-worker concurrency does not impose a strict machine-wide cap: an orphaned co
 
 ```sh
 npm ci
+npm run setup
 npm run typecheck
 npm test
 npm run build
@@ -129,15 +133,41 @@ RUN_INTEGRATION=1 RUN_DOCKER_TESTS=1 npm run test:integration
 
 In PowerShell, set both `$env:RUN_INTEGRATION='1'` and `$env:RUN_DOCKER_TESTS='1'` before running the tests. The Docker cases inspect configured resource limits and cleanup behavior and check that a short-lived container deadline fires independently. They do not measure supported workload concurrency. CI enables these checks on its Linux Docker host; inspect the actual result before claiming success. Full public Docker checkout/builds remain a separate demo-helper procedure.
 
-The persistence suites cover competing expected attempts, expired claims, stale renewal/log/pin/failure/publication rejection, bounded retry exhaustion, cleanup eligibility, failed-build preservation, out-of-order completion, rollback races, and additive migrations. The S3/HTTP suites cover isolated attempt prefixes, immutable writes, completion markers, content validation, legacy versions, and pinned serving. The child-process recovery harness adds real upload/marker crash boundaries. Passing these tests is narrower than proving arbitrary infrastructure failure recovery or hostile-code isolation.
+The persistence suites cover competing expected attempts, expired claims, stale fences, retry exhaustion, cleanup, failed-build preservation, ordering, rollback races and additive migrations. S3/HTTP cases cover immutable attempts, completion markers, checksums, legacy compatibility and pinned serving. The killed-child harness tests real upload/marker crash boundaries with prepared build output. M4 adds ownership/session, signed-delivery, host-routing, Keep and retention cases. Destructive maintenance fixtures use random isolated PostgreSQL schemas before touching retention state, preserving existing development projects. Passing these cases does not prove arbitrary infrastructure recovery or hostile-code isolation.
+
+## Ownership and separate browser origins
+
+1. Add a second operator using the private configuration procedure in [DEPLOYMENT.md](DEPLOYMENT.md#accounts-and-secret-rotation), then recreate the API.
+2. Sign in as the second operator in another browser profile. The first operator's projects must be absent. Direct management requests for their project/history/logs/restore/Keep must return 404; a missing/invalid access key returns 401.
+3. Open the first project's public site without a session. It should remain readable: publication is intentionally public.
+4. On a project host, request `/api/session` and `/health`; both must return 404. Normal local storage and a correctly version-scoped service worker can work there. Check the same APIs are unavailable on the dashboard-host sandbox fallback.
+5. Record actual browser, resolver and operating-system details. If `*.sites.localhost` does not resolve, use the path fallback or explicit local DNS mapping; do not call an untested host setup complete.
+
+## Signed GitHub webhook
+
+1. Use a trusted repository that you control. In the owning project's dashboard, enable its webhook and privately copy the returned URL and project secret. The API needs its generated `GITHUB_WEBHOOK_KEY` configured.
+2. Configure a GitHub repository webhook with that payload URL, JSON content type, returned secret and push events. GitHub needs a reachable HTTPS endpoint; localhost is not reachable from GitHub. A local forwarding service is separate operator setup. GitHub documents [delivery handling](https://docs.github.com/en/webhooks/using-webhooks/handling-webhook-deliveries) and [signature validation](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries).
+3. Push a visible change to `main`. Record the delivery GUID, `after` SHA and created deployment ID. Verify the deployment pins that SHA rather than resolving a later branch head.
+4. Redeliver the same GitHub delivery. It must refer to the original deployment without incrementing its generation or creating another build. Signed reuse of the same GUID with changed bytes/event returns 409; automated tests construct that conflict without modifying a live delivery.
+5. Push another branch or delete a ref. Valid ignored deliveries should be recorded without a deployment. Rotate the project secret in Shipyard, update GitHub, and verify the previous secret no longer works. Disabling also invalidates the previous configuration.
+
+Signatures cover the exact raw body, bounded to 1 MiB, and the API validates the repository/ref. Keep master, per-project and operator keys private. Publication follows accepted project transaction order; deliberately delayed earlier push events can still receive a newer generation. No GitHub chronology/head freshness guarantee is claimed.
+
+## Keep and retention
+
+Use **Keep** on a completed available version. Confirm the flag persists and does not change the active pointer, rebuild the site or delete artifacts. A different owner cannot change it. Restoring and keeping versions already marked deleting/deleted is rejected.
+
+Actual deletion is exercised by isolated integration fixtures, which create old versions and test active/manual/newest protection, deletion/restore races, tombstone retry and 410 serving. Run the opted-in suite against development infrastructure to collect that evidence. Leave `RETENTION_DAYS=0` on projects you want to preserve; do not backdate real deployments or enable a purge to manufacture a demo.
+
+For an intentional operated installation, follow [the retention procedure](DEPLOYMENT.md#retention-and-failure-handling). A positive age enables irreversible artifact deletion, with `RETENTION_KEEP` newest successful versions, active and Keep versions protected. Changing the age back to zero stops new claims; already deleting jobs still complete. History/logs remain, and there is no undelete API.
 
 ## Remaining acceptance demonstrations
 
 Do not present the following as completed evidence merely because their procedures or tests exist:
 
-- Duplicate delivery across retry/crash boundaries, child termination during upload, and Docker cleanup: implemented milestone 3 cases; collect their actual run results.
-- Out-of-order completion and rollback overlapping a build: implemented milestone 2 integration cases; collect their actual run results.
-- Signed webhook delivery, ownership, retention, and host-based routing: milestone 4.
+- Milestone 2 ordering/rollback and milestone 3 recovery cases have the CI results linked in `PLAN.md`; retain their exact infrastructure/scenario limits.
+- Milestone 4 ownership, signed delivery, host routing and retention are implemented; collect their actual final CI and browser results before claiming verification.
+- Public Git checkout through the fixed Docker recipe, browser interaction, HTTPS/proxy setup and the benchmark workload still need recorded demonstrations.
 
 Database tokens and leases govern duplicate/recovery safety. Test evidence still applies only to the scenarios and infrastructure actually exercised.
 
@@ -145,11 +175,16 @@ Database tokens and leases govern duplicate/recovery safety. Test evidence still
 
 - Docker connection errors: start Docker Desktop/Engine in Linux-container mode and rerun `docker info`.
 - Missing `shipyard-builder:local`: run `docker compose --profile tools build builder`.
+- API exits for missing credentials: run `npm run setup`, retain the generated `.env`, and recreate the API container.
+- API returns 401: use the current operator access key or sign in again after key rotation.
+- API returns 404 for a project: verify you are using its owning configured identity.
 - Dependency install failure: ensure the fixture has a compatible `package-lock.json` on `main`; inspect the deployment log.
 - Missing `dist/index.html`: check the repository build script and output directory against the supported recipe.
-- Existing site assets fail: use relative URLs and rebuild with `--base=./`; avoid browser APIs restricted by the local sandbox.
+- Existing site assets fail: use relative URLs and rebuild with `--base=./`; check the version basename and whether the URL is the sandbox fallback.
 - A successful build is not marked LIVE: a newer request or restore superseded its publication generation. Open its immutable version or restore it explicitly.
 - Restore reports `409`: inspect storage availability and version integrity. Do not bypass the completion manifest or change the active pointer manually.
 - M1/M2 upgrade behaves inconsistently: stop both API and worker and verify they run the same rebuilt code. Mixed tokenless/current processes are unsupported.
 - A deployment remains `building` after forced termination: confirm a worker is running, the lease is expired, and database/Redis access works. Recovery scans every five seconds; do not bypass claim checks or reset database status manually.
 - Old Docker objects remain: inspect their `shipyard.managed`/claim labels and whether the token is active. Maintenance is bounded; pre-milestone-3 unlabeled resources are outside automatic token cleanup.
+- Webhook returns 401/409: verify the current per-project secret, raw body, delivery ID and key rotation; do not log the secret while diagnosing.
+- Version returns 410: retention has begun or completed artifact deletion. Use another available version or rebuild; inspect backups separately.

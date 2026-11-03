@@ -20,6 +20,7 @@ function versionPrefix(deploymentId: string, attemptId?: string): string {
 function outputKey(key: string): string {
   artifactKey(key);
   if (key === manifestKey) throw new InputError('Artifact uses a reserved manifest name');
+  if (key.split('/').some(part => part === '.git' || part === '.env' || part.startsWith('.env.'))) throw new InputError('Sensitive configuration files cannot be published');
   return key;
 }
 
@@ -229,7 +230,14 @@ export function getArtifact(deploymentId: string, key: string, attemptId?: strin
 
 export async function deleteAttemptArtifacts(deploymentId: string, token: string, signal?: AbortSignal): Promise<void> {
   requireUuid(token);
-  const prefix = versionPrefix(deploymentId, token);
+  await deleteArtifactPrefix(versionPrefix(deploymentId, token), signal);
+}
+
+export async function deleteDeploymentArtifacts(deploymentId: string, signal?: AbortSignal): Promise<void> {
+  await deleteArtifactPrefix(versionPrefix(deploymentId), signal);
+}
+
+async function deleteArtifactPrefix(prefix: string, signal?: AbortSignal): Promise<void> {
   const deadline = AbortSignal.any([AbortSignal.timeout(config.buildTimeoutMs), ...(signal ? [signal] : [])]);
   let deleted = 0;
   for (;;) {

@@ -10,8 +10,10 @@ import { pool, migrate, claimDeployment, activateDeployment, recordDeploymentCom
 import { deleteAttemptArtifacts, ensureBucket, s3, uploadArtifacts } from '../../src/storage.js';
 import { config } from '../../src/config.js';
 import type { ArtifactManifest, Deployment, Project } from '../../src/contracts.js';
+import { configureTestAuth, operatorToken } from '../auth-fixture.js';
 
 test('API restores validated versions and keeps previously opened asset URLs pinned', { skip: process.env.RUN_INTEGRATION !== '1' }, async () => {
+  const restoreAuth = configureTestAuth();
   const { queue } = await import('../../src/queue.js');
   const directory = await mkdtemp(join(tmpdir(), 'shipyard-serving-'));
   const deployments: Deployment[] = [];
@@ -23,7 +25,7 @@ test('API restores validated versions and keeps previously opened asset URLs pin
   assert.ok(address && typeof address !== 'string');
   const base = `http://127.0.0.1:${address.port}`;
   async function post(path: string, body: unknown) {
-    return fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
+    return fetch(`${base}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${operatorToken}` }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
   }
   async function writeOutput(label: string) {
     await writeFile(join(directory, 'index.html'), `<script type="module" src="./assets/app.js"></script><h1>${label}</h1>`);
@@ -112,6 +114,7 @@ test('API restores validated versions and keeps previously opened asset URLs pin
     await queue.close();
     await pool.end();
     s3.destroy();
+    restoreAuth();
     await rm(directory, { recursive: true, force: true });
   }
 });

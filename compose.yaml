@@ -19,6 +19,8 @@ x-platform-environment: &platform-environment
   MAX_ARTIFACT_BYTES: ${MAX_ARTIFACT_BYTES:-67108864}
   MAX_ARTIFACT_FILES: ${MAX_ARTIFACT_FILES:-5000}
   MAX_LOG_BYTES: ${MAX_LOG_BYTES:-1048576}
+  RETENTION_DAYS: ${RETENTION_DAYS:-0}
+  RETENTION_KEEP: ${RETENTION_KEEP:-5}
 
 services:
   postgres:
@@ -75,6 +77,11 @@ services:
       <<: *platform-environment
       HOST: 0.0.0.0
       PORT: 3000
+      AUTH_USERS: ${AUTH_USERS:-[]}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      GITHUB_WEBHOOK_KEY: ${GITHUB_WEBHOOK_KEY:-}
+      DASHBOARD_ORIGIN: ${DASHBOARD_ORIGIN:-http://localhost:3000}
+      SITE_BASE_URL: ${SITE_BASE_URL:-http://sites.localhost:3000}
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:

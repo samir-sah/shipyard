@@ -21,6 +21,18 @@ test('validates complete output, nested files and hashes before publishing', asy
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
+test('refuses environment and Git configuration files before uploading output', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'shipyard-sensitive-'));
+  try {
+    await writeFile(join(directory, 'index.html'), 'ok');
+    await writeFile(join(directory, '.env.production'), 'SECRET=fixture');
+    await assert.rejects(inspectArtifacts(directory), /Sensitive configuration/);
+    await rm(join(directory, '.env.production'));
+    await mkdir(join(directory, '.git'));
+    await assert.rejects(inspectArtifacts(directory), /Sensitive configuration/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 test('rejects symlinks rather than reading outside the output tree', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'shipyard-link-'));
   try {

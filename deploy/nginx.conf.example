@@ -1,0 +1,42 @@
+# Example only: replace domains and supply your own existing certificates.
+# Install within nginx's http context, then run nginx -t before reloading.
+upstream shipyard_api {
+    server 127.0.0.1:3000;
+}
+
+server {
+    listen 443 ssl default_server;
+    server_name _;
+    ssl_certificate /etc/shipyard/tls/dashboard.fullchain.pem;
+    ssl_certificate_key /etc/shipyard/tls/dashboard.key;
+    return 444;
+}
+
+server {
+    listen 443 ssl;
+    server_name shipyard.example.com;
+    ssl_certificate /etc/shipyard/tls/dashboard.fullchain.pem;
+    ssl_certificate_key /etc/shipyard/tls/dashboard.key;
+    client_max_body_size 1m;
+
+    location / {
+        proxy_pass http://shipyard_api;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 360s;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name *.sites.example.net;
+    ssl_certificate /etc/shipyard/tls/sites.fullchain.pem;
+    ssl_certificate_key /etc/shipyard/tls/sites.key;
+
+    location / {
+        proxy_pass http://shipyard_api;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 360s;
+    }
+}

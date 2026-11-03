@@ -16,7 +16,8 @@
     "test:integration": "tsx --env-file-if-exists=.env --test --test-concurrency=1 test/integration/*.test.ts",
     "start": "node --env-file-if-exists=.env dist/server/api.js",
     "worker": "node --env-file-if-exists=.env dist/server/worker.js",
-    "demo": "tsx --env-file-if-exists=.env scripts/demo.ts"
+    "demo": "tsx --env-file-if-exists=.env scripts/demo.ts",
+    "setup": "node scripts/setup.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1161.0",

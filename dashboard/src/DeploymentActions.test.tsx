@@ -29,3 +29,26 @@ test('restore controls stay disabled during a pending action and identify the re
   assert.ok(html.includes('disabled=""'));
   assert.ok(html.includes('Restoring…'));
 });
+
+test('separate-origin versions use the pinned host route', () => {
+  const html = render('deployed', { project: { ...project, siteUrl: 'http://test-site.sites.localhost:3000/' } });
+  assert.ok(html.includes(`href="http://test-site.sites.localhost:3000/_shipyard/v/${id}/"`));
+  assert.ok(!html.includes('/versions/'));
+});
+
+test('expired and deleting versions keep history without actionable artifact links', () => {
+  for (const artifactState of ['deleting', 'deleted'] as const) {
+    const html = render('deployed', { deployment: { id, status: 'deployed', artifactState }, onRetain: () => {} });
+    assert.ok(!html.includes('<a') && !html.includes('<button'));
+    assert.ok(html.includes(artifactState === 'deleting' ? 'Expiring…' : 'Artifacts expired'));
+  }
+});
+
+test('manual keep is explicit, reflects retained state and can protect an active version after a later deployment', () => {
+  let html = render('deployed', { deployment: { id, status: 'deployed', retained: true, artifactState: 'available' }, onRetain: () => {} });
+  assert.ok(html.includes('aria-pressed="true"'));
+  assert.ok(html.includes('>Kept</button>'));
+  html = render('deployed', { project: { ...project, activeDeploymentId: id }, onRetain: () => {} });
+  assert.ok(html.includes('Keep deployment 11111111'));
+  assert.ok(!html.includes('Restore deployment'));
+});

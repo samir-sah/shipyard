@@ -1,112 +1,93 @@
 # Shipyard
 
-Shipyard turns a supported public GitHub repository into a local static site. Submit a repository, follow its build logs, open an immutable deployment, and restore a completed version from the dashboard.
+Shipyard turns a supported public GitHub repository into a static site on its own subdomain. Sign in, submit a repository, follow its build logs, and restore a completed version without rebuilding it.
 
-This repository implements **milestones 1–3** of a self-hosted portfolio project. The API and worker use TypeScript/Node.js, the dashboard uses React/Vite, PostgreSQL stores deployment records and worker leases, BullMQ/Redis schedules build attempts, Docker runs the build recipe, and SeaweedFS provides S3-compatible artifact storage. Authentication, ownership, webhooks, separate site origins, and retention are the next milestone.
+All four planned implementation milestones are present: TypeScript API/workers, React dashboard, PostgreSQL metadata, BullMQ/Redis scheduling, bounded Docker builds, immutable S3 artifacts, rollback, worker recovery, ownership, signed webhooks, host routing, and retention. SeaweedFS supplies S3-compatible local storage. [The verification record](docs/PLAN.md#verification-record) distinguishes passing checks from pending public-Git, browser, and performance evidence.
 
 ## Run locally
 
-Requires Docker Engine with Linux containers and Docker Compose v2. On Windows/macOS, start Docker Desktop first. Allow at least 2 CPUs, 4 GiB RAM, and 5 GiB free disk for a small demo. These are setup recommendations, not measured capacity.
+Requires Node.js 22.12+ and Docker Engine with Linux containers and Compose v2. Node.js 24 LTS is recommended. On Windows/macOS, start Docker Desktop first. A small demo should start with at least 2 CPUs, 4 GiB RAM, and 5 GiB free disk; these are recommendations, not measured capacity.
 
 ```sh
 git clone https://github.com/samir-sah/shipyard.git
 cd shipyard
-cp .env.example .env
+npm run setup
 docker compose --profile tools build
 docker compose up -d --build
 docker compose logs -f api worker
 ```
 
-In PowerShell, use `Copy-Item .env.example .env` instead of `cp` if preferred. Open [the dashboard](http://localhost:3000). The API and all development services bind only to the local machine. Named Docker volumes preserve metadata, queued jobs, and artifacts across restarts.
+Setup creates a private, ignored `.env`, generates missing access/session/webhook keys, and preserves existing nonempty credentials. Open [the dashboard](http://localhost:3000). Sign in with the operator token from `AUTH_USERS` in your local `.env`. Keep that file and token private. Existing projects belong to the bootstrap operator ID described in [deployment and accounts](docs/DEPLOYMENT.md#accounts-and-secret-rotation).
 
-The `builder` service is an image build target under the `tools` profile. Build it before submitting a deployment. Do not run that service directly; the worker creates one bounded container and named work volume per build attempt.
-
-Stop services with `docker compose down`. Avoid `docker compose down -v` when keeping deployment history: `-v` deletes the database, queue, and artifact volumes.
+Compose publishes development services only on loopback. Named volumes preserve PostgreSQL, Redis, and artifacts. The `builder` service is an image target under the `tools` profile; the worker creates its own bounded container and volume for each attempt. Stop services with `docker compose down`. Adding `-v` deletes persistent volumes, including deployment history and published sites.
 
 ## Supported repository recipe
 
-| Setting | Supported recipe |
+| Setting | Supported value |
 | --- | --- |
-| Source | Public HTTPS GitHub URL, `https://github.com/owner/repo.git` |
-| Branch | `main` |
-| Project directory | Repository root |
-| Lockfile | Committed `package-lock.json` |
+| Source | Public `https://github.com/owner/repo.git` URL |
+| Branch / directory | `main`, repository root |
+| Lockfile | Committed root `package-lock.json` |
 | Install | `npm ci` |
 | Build | `npm run build -- --base=./` |
 | Output | `dist/`, containing `index.html` |
-| Runtime | Node.js 24 in the builder image |
-| Site URL | `http://localhost:3000/sites/<project-slug>/` |
-| Immutable version URL | `http://localhost:3000/versions/<project-slug>/<deployment-id>/` |
+| Builder runtime | Node.js 24 |
+| Default site | `http://<project-slug>.sites.localhost:3000/` |
+| Pinned version | `http://<project-slug>.sites.localhost:3000/_shipyard/v/<deployment-id>/` |
 
-The build script must accept Vite's `--base=./` argument. Paths inside the generated site must be relative. The active site path redirects to its immutable version URL, keeping the document and its relative assets on the same deployment after another release. Extensionless version paths fall back to `index.html`; files with extensions return 404 when missing. Hash routing is the simplest path-hosted choice. History routers need a base matching the immutable version path, with care for relative assets on nested routes.
+Use repositories you trust: install/build scripts execute code and have network access. The build script must accept Vite's `--base=./`; emitted asset paths must be relative. Hash routing is the easiest choice. History routers need a matching version basename, and nested routes need correctly resolved relative assets. Shipyard itself produces `dist/dashboard`, so this repository is not a fixture for that recipe.
 
-Deployed pages run under a browser sandbox because the local path fallback shares the dashboard's host. Scripts and module assets work, but local storage, cookies, service workers, and APIs needing a normal same-origin document are unsupported. Separate site origins are planned in milestone 4.
+The project host redirects to a pinned version URL. Its document and relative assets stay on that version during later publication or rollback. Project hosts have normal browser origins: local storage and version-scoped service workers can work. Projects have separate hosts; versions of one project share its origin. When local DNS does not resolve `*.sites.localhost`, the dashboard-host `/sites/<slug>/` fallback still works with an opaque-origin CSP sandbox; cookies, local storage, and service workers are unavailable there.
 
-Use repositories you trust. Dependency install scripts and the repository build command execute code and can access the network. See [the build threat model](docs/ARCHITECTURE.md#build-threat-model).
+Published artifacts are public. Project hosts never expose dashboard API, session, or health routes. Ownership controls the management API and dashboard, including deployment submission, history, logs, rollback, Keep, and webhook configuration.
+
+## Publication, rollback, and recovery
+
+Creating a deployment advances the project's publication generation. **Latest requested build wins**: a successful build activates only while its generation remains current. An older completion cannot replace the active site after a newer request, even if that newer request fails. Superseded successful versions remain in history.
+
+The worker validates the output, uploads immutable files, reads them back to verify size/SHA-256, then writes the completion manifest. Only afterward can a guarded PostgreSQL transaction select the version. Failed builds preserve the active site. **Restore** verifies the target's saved manifest and every stored object, advances the project generation, and switches the pointer. Earlier queued/running builds cannot undo the restore; a later request can publish normally.
+
+Each attempt has a persisted UUID token, a default 30-second lease renewed every 10 seconds, its own Docker resources/workspace/artifact prefix, and an expected-attempt job ID. PostgreSQL fences stale renewal, logs, commit pinning, failure, and publication. A five-second scan reconstructs queued work and recovers expired claims. Failures retry up to three total attempts by default, using exponential backoff capped at 60 seconds. Lowering the attempt limit also closes exhausted queued retries.
+
+Manual builds pin their Git SHA after the first completed Docker build, before upload; a crash before that pin may resolve newer `main`. A verified push webhook pins its payload SHA when the deployment is created. Containers enforce their own deadline even if their worker disappears. Maintenance revisits abandoned resources every 60 seconds. Per-worker concurrency is not a strict machine-wide container cap, and cleanup is bounded and best effort. [Architecture and threat model](docs/ARCHITECTURE.md) explains these limits.
+
+`queueWaitMs` measures creation to first claim. The API's historical field `buildDurationMs` measures elapsed time after that claim, including retry backoff, later queue waits, validation/upload, and worker downtime; it is not pure Docker build time. Per-attempt timestamps provide a separate operational timeline.
+
+## Webhooks and retention
+
+Enable a project's GitHub webhook in the dashboard and copy the returned URL and secret into that repository's webhook settings using JSON payloads. Each enable/rotate action produces a new project-scoped secret; update GitHub after rotation. Disable invalidates the old secret. The API validates the raw payload signature, repository, `main` ref, and commit before atomically recording its delivery and queued deployment. Repeated delivery IDs reuse the original result; conflicting payloads return `409`. Other branches/deletions do not create deployments. Latest accepted database order governs publication; webhook arrival order does not prove which commit is the newest GitHub head. See [the webhook demo](docs/DEMO.md#signed-github-webhook).
+
+Retention defaults to `RETENTION_DAYS=0`, which disables new deletion claims. With a positive age, it can delete old successful artifacts outside `RETENTION_KEEP=5` newest successful versions per project. Active versions and versions marked **Keep** are protected independently. A deletion claim changes `artifactState` from `available` to `deleting` under the same project lock used by restore/Keep. Such jobs resume after a crash, even if new retention is then disabled, and finish as `deleted`. Expired version URLs return `410`; history and logs remain. Keep does not delete anything, and deleted artifacts cannot be undeleted through Shipyard.
 
 ## Development and checks
 
-Host development requires Node.js 22.12+; supported Node.js 24 LTS is recommended. Exact npm versions are recorded in `package-lock.json`.
-
 ```sh
 npm ci
+npm run setup
 docker compose --profile tools build builder
-docker compose up -d postgres redis storage
+docker compose up -d --wait postgres redis storage
 npm run dev:api
-# In separate terminals:
+# Separate terminals:
 npm run dev:worker
 npm run dev:dashboard
 ```
 
-The Vite dev server proxies API, active site, and immutable version paths to port 3000. Host processes use values in `.env`; after changing its PostgreSQL password, keep `DATABASE_URL` consistent. Compose supplies internal service URLs automatically.
+Host scripts load `.env`; keep `DATABASE_URL` consistent with its PostgreSQL password. Compose supplies internal service URLs and passes authentication/webhook master keys only to the API. The Vite server proxies local API/site/version paths to port 3000.
 
 ```sh
 npm run typecheck
 npm test
 npm run build
+docker compose config --quiet
+RUN_INTEGRATION=1 RUN_DOCKER_TESTS=1 npm run test:integration
 ```
 
-Integration tests need running local services and the explicit `RUN_INTEGRATION=1` environment variable. Docker resource/cleanup tests additionally require a working Linux Docker daemon and `RUN_DOCKER_TESTS=1`. See [the demo guide](docs/DEMO.md) for recovery and end-to-end verification and [the benchmark template](docs/BENCHMARK.md) for measurements. Actual results are recorded in [the plan](docs/PLAN.md#verification-record).
+In PowerShell, set `$env:RUN_INTEGRATION='1'` and `$env:RUN_DOCKER_TESTS='1'` before the last command. Integration tests require running backing services; Docker cases also require the builder image and a Linux daemon. Retention/ownership maintenance suites use isolated random PostgreSQL schemas. Other suites use unique fixture IDs in the configured database; run them against disposable development services. Never infer a passing integration run from an unset flag and skipped tests.
 
-## Version selection and restore
+The [demo guide](docs/DEMO.md) covers successful/failed deployments, rollback, crashes, ownership, webhook redelivery, and retention. The helper now requires `SHIPYARD_TOKEN` set explicitly to an operator access token. [Benchmarks](docs/BENCHMARK.md) remain unmeasured.
 
-Deployments persist `queued`, `building`, `failed`, or `deployed` state, timestamps, logs, attempt counts, and artifact selection. Each attempt writes an immutable S3 prefix under its stable deployment ID. The worker validates the local output, uploads without overwriting existing objects, reads files back to verify actual SHA-256 and size, and writes a completion manifest last. Only a complete version can become a successful new deployment. Queue wait and deployment elapsed time are recorded separately; the API field `buildDurationMs` includes retry waits and worker downtime after the first claim.
+## Upgrade and operation
 
-**Latest requested build wins.** Creating a deployment advances the project's publication generation. A successful build changes the active pointer only if its generation is still current. If a newer request fails, an older build finishing later still cannot publish; the previously active site stays available. A superseded successful build remains `deployed` in history and can be opened or restored. The dashboard's **LIVE** marker identifies the active version.
+Stop both API and worker, back up PostgreSQL/Redis/S3 plus `.env`, update the checkout, run `npm run setup` to add missing keys, rebuild both images, and restart matching application versions. Additive migrations preserve IDs, history, manifests, and active selection; migration 004 assigns existing projects to the fixed bootstrap owner. Migration 003 requeues old unclaimed builds. Mixed old/new workers and automatic downgrades are unsupported. See [the deployment procedure](docs/DEPLOYMENT.md) before exposing the API beyond localhost.
 
-Use **Restore** on a completed version, or send `POST /api/projects/<project-id>/rollback` with JSON `{"deploymentId":"<deployment-id>"}`. Restore checks every stored file against its manifest before a guarded database transaction changes the pointer and advances the generation. Earlier queued or running builds may finish as retained versions but cannot undo that restore. A build requested after restore can publish. Concurrent actions are ordered by PostgreSQL's project-row lock and committed transactions, not HTTP arrival time.
-
-The stable `/sites/<slug>/` path returns a non-cacheable `302` redirect to `/versions/<slug>/<deployment-id>/`. Keep the stable link for the current release and the version link for a particular build.
-
-## Worker recovery and retries
-
-PostgreSQL grants each attempt a unique token and a 30-second lease, renewed every 10 seconds by default. Logs, commit pinning, failure transitions, and publication require the current unexpired token. A duplicate or stale queue delivery cannot claim a different expected attempt. BullMQ deduplication is useful, but the database is the authority.
-
-The worker scans expired leases and ready queued deployments every five seconds. Failures and expired claims retry up to `MAX_BUILD_ATTEMPTS=3`, with 1-second, 2-second, then exponentially increasing delays capped at 60 seconds when more attempts are configured. Builder and upload errors share this bounded retry policy; a deterministic bad build also consumes its attempts before becoming terminally `failed`.
-
-The first completed build pins its Git SHA before upload. Later attempts fetch that SHA. A crash before the SHA is recorded may resolve a newer `main` on retry. Each attempt has a separate token, Docker container/volume, temporary directory, and artifact prefix; stale uploads cannot overwrite the selected attempt's output or publish without the database fence.
-
-The build container also enforces its own deadline, with a 10-second forced-kill grace, even if its worker disappears. Normal completion cleans Docker resources and temporary files. A maintenance pass every 60 seconds removes abandoned labeled resources and failed/expired attempt prefixes, preserving active claims and selected/retained successful versions. Cleanup is bounded and best effort; crashes or a large backlog can leave resources until later passes. See [recovery and cleanup](docs/ARCHITECTURE.md#worker-leases-retries-and-cleanup).
-
-## Upgrade an existing milestone 1 or 2 installation
-
-Stop both application processes before updating. Old code lacks the current generation, lease-token, or attempt-prefix rules, so mixed application versions are unsupported. Compose waits for the worker's current attempt within its configured shutdown grace period; investigate any forced stop before restarting.
-
-```sh
-docker compose stop api worker
-git pull --ff-only
-docker compose --profile tools build
-docker compose up -d api worker
-```
-
-Keep PostgreSQL, Redis, and storage running with their existing volumes. Back up persisted state before upgrading. Startup applies additive migrations: project/history IDs, existing manifests, and the active pointer remain. Migration 003 requeues old `building` rows after the coordinated stop. Milestone 1 versions without manifests retain their legacy read path; restore verifies the discoverable objects and lazily seals them. Existing milestone 2 root-prefix versions remain readable and restorable. See [migration compatibility](docs/ARCHITECTURE.md#migration-compatibility).
-
-There is no automatic database or application downgrade. Older applications cannot read newly published milestone 3 attempt prefixes, even though the schema changes are additive. Any local downgrade requires stopping **both** API and worker and a compatibility or backup plan for the selected artifacts; checking out old code alone is insufficient. Do not mix tokenless old workers with the current application.
-
-## Current limits
-
-Recovery requires a running worker, reachable PostgreSQL/Redis/storage, and working Docker cleanup. Database fencing prevents stale publication; it does not stop an unreachable process instantly. Per-worker concurrency is not a strict machine-wide cap: an orphaned container can overlap a replacement until timeout or cleanup. A worker can clean only its own local temporary directories, while labeled containers/volumes are visible on its Docker daemon. Old unlabeled resources need operator review. Machine capacity remains unmeasured.
-
-This local demo has no authentication or ownership checks. Keep ports bound to loopback. Build containers receive no platform secrets or Docker socket, but the worker controls the host Docker daemon. CPU, memory, PID, and per-attempt time limits do not bound checkout/dependency disk usage. Builds can access the network, deployment submission has no queue-growth quota, and successful artifact retention is unbounded. Use trusted repositories only.
-
-See [the architecture](docs/ARCHITECTURE.md), [milestones and remaining work](docs/PLAN.md), and [demo procedure](docs/DEMO.md). Custom domains, Kubernetes, arbitrary backend applications, and additional build recipes remain outside this first version.
+HTTPS and a separate registrable site domain are recommended for a manually operated dedicated host. TLS, DNS, backups, and reverse-proxy setup remain operator work; no external deployment was performed here. Signup, SSO, ownership transfer, custom domains, Kubernetes, additional recipes, and arbitrary backend applications are outside scope. CPU/memory/PID/time limits do not bound checkout/npm disk usage or prove hostile-code isolation. There is no submission-rate/queue-growth quota or measured capacity guarantee. Secret-looking `.env`/`.git` output paths are rejected, but secrets embedded in compiled JavaScript cannot be detected reliably.
