@@ -3,6 +3,7 @@ name: checks
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -25,7 +26,7 @@ jobs:
 
   integration:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -57,6 +58,25 @@ jobs:
         with:
           name: public-demo
           path: .tmp/public-demo.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+      - name: Measure five-request burst at concurrency one
+        if: github.event_name == 'workflow_dispatch'
+        run: npx tsx --env-file=.env scripts/benchmark.ts
+        env:
+          WORKER_CONCURRENCY: '1'
+      - name: Measure five-request burst at concurrency two
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          WORKER_CONCURRENCY=2 docker compose up -d --wait --no-deps --force-recreate worker
+          WORKER_CONCURRENCY=2 npx tsx --env-file=.env scripts/benchmark.ts
+      - name: Save benchmark evidence
+        if: always() && github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: benchmark
+          path: .tmp/benchmark-*.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
