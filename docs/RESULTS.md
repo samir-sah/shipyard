@@ -66,3 +66,21 @@ Completion rate divides successful measured deployments by earliest measured cre
 A measured portfolio statement is:
 
 > Completed 10/10 public Vite deployments across two five-request CI bursts at worker concurrency 1 and 2, observing 2.16 and 3.87 completions/minute respectively under per-build 1 CPU / 512 MiB limits, with no retries and all served artifacts verified by SHA-256.
+
+## HTTPS proxy verification
+
+[CI run 41694725753](https://github.com/samir-sah/shipyard/actions/runs/41694725753) passed at `b3a8e7a98bd5bd76fdf52a21583a0669c45e0a8c` on November 3, 2026 UTC. It passed the normal checks, all 39 unit and 40 integration tests, the real public deployment smoke, and `scripts/proxy-demo.ts`. The proxy used Nginx `1.30.6-alpine` with the image digest saved in the [sanitized JSON report](evidence/proxy-demo-2026-11-03.json). This durable copy matches the report printed in the successful CI logs; the downloadable `proxy-demo` artifact is retained seven days.
+
+The runner mounted the checked-in Nginx example with only its upstream address changed to `api:3000`. It generated an ephemeral private test CA and a leaf certificate covering the dashboard and wildcard site names. The CA private key was not mounted into Nginx; no OS/browser trust settings were changed. The client explicitly trusted that CA, sent the required SNI/Host, and negotiated TLS 1.3 on loopback port 8443.
+
+Actual passing assertions covered `nginx -t`, HTTPS health, rejection of an untrusted CA and a wrong SAN, the Secure/HttpOnly/SameSite=Strict/host-only `__Host-shipyard_session` response, cookie-authenticated management, cross-origin mutation rejection, site-host API isolation, unknown-host connection rejection, and logout cookie clearing. Both pinned HTTPS serving routes matched every size/SHA-256 for 35 files / 3,282,526 bytes from reviewed fixture commit `cfda8c5841b6e57f644f19aa10c4329553162a15`. The API's previous origins were restored and the test proxy/container/private keys removed before the successful step completed.
+
+The first proxy run failed its logout assertion because the test client's DELETE body omitted explicit HTTP framing. Adding the JSON `Content-Length` fixed the test client; product code and Nginx configuration did not change. Logout evidence concerns clearing the client cookie, not revoking a copied stateless cookie. A raw HTTPS client does not prove browser cookie/SameSite enforcement or deployed JavaScript behavior. This was a private-CA loopback test, with public DNS, public issuance/renewal, public ingress, TLS capacity and production operation still unverified.
+
+## Local runtime follow-up
+
+Docker Desktop's inaccessible stale runtime endpoints were preserved by renaming its `run` directory to `run.shipyard-stale-20261103-235447` under its existing local data parent, after stopping only the failed processes started for these checks. A normal start then exposed Linux Engine `29.7.2`. No images, settings, data disks or volumes were deleted to recover startup.
+
+The attempted local bootstrap pulled development images and started backing services, but the image build hit a Go `SIGBUS` and Docker stopped responding. Host checks confirmed `C:` had **0 free bytes**, while workspace drive `S:` had about 80 GB free. Docker's data VHDX was about 11.52 GB on `C:`. Disk exhaustion is a plausible explanation for the crash; no filesystem-corruption diagnosis is established. Free space should have been checked on the actual Docker data drive before starting image pulls.
+
+The build/diagnostic commands were canceled. The Docker processes started for the check were stopped and only the `docker-desktop` WSL distribution was returned to its previously stopped state. Images, disks and development volumes remain preserved; Docker data was not relocated. The local successful project/site browser flow therefore remains unverified pending space recovery or an approved data relocation. The earlier limited browser observations and passing CI evidence remain as recorded above.

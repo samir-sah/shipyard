@@ -2,11 +2,13 @@
 
 Shipyard turns a supported public GitHub repository into a static site on its own subdomain. Sign in, submit a repository, follow its build logs, and restore a completed version without rebuilding it.
 
-All four planned implementation milestones are present: TypeScript API/workers, React dashboard, PostgreSQL metadata, BullMQ/Redis scheduling, bounded Docker builds, immutable S3 artifacts, rollback, worker recovery, ownership, signed webhooks, host routing, and retention. SeaweedFS supplies S3-compatible local storage. [The verification record](docs/PLAN.md#verification-record) distinguishes passing checks from pending public-Git, browser, and performance evidence.
+All four planned implementation milestones are present: TypeScript API/workers, React dashboard, PostgreSQL metadata, BullMQ/Redis scheduling, bounded Docker builds, immutable S3 artifacts, rollback, worker recovery, ownership, signed webhooks, host routing, and retention. SeaweedFS supplies S3-compatible local storage. [The verification record](docs/PLAN.md#verification-record) covers public Git builds, small benchmark bursts, a private-CA HTTPS proxy smoke and limited browser checks, with remaining limits stated explicitly.
 
 ## Run locally
 
 Requires Node.js 22.12+ and Docker Engine with Linux containers and Compose v2. Node.js 24 LTS is recommended. On Windows/macOS, start Docker Desktop first. A small demo should start with at least 2 CPUs, 4 GiB RAM, and 5 GiB free disk; these are recommendations, not measured capacity.
+
+Check free space on Docker's data drive as well as the checkout drive before pulling/building images. On Windows, Docker's virtual disk can be on `C:` even when this repository is on another drive. `Get-PSDrive -PSProvider FileSystem | Select-Object Name,Free` reports host-drive free bytes; Docker's internal free-space figure alone does not establish room for its backing virtual disk to grow.
 
 ```sh
 git clone https://github.com/samir-sah/shipyard.git

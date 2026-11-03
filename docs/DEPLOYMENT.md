@@ -4,6 +4,8 @@ This is a manual procedure for a dedicated, operator-managed host running truste
 
 ## Local bootstrap and upgrade
 
+Before image pulls/builds, verify free space on both the Docker data drive and workspace drive. Docker Desktop's virtual disk may live on `C:` while the checkout is on another drive. On Windows, use `Get-PSDrive -PSProvider FileSystem | Select-Object Name,Free`; on Linux, use `df -h` for the Docker root and workspace filesystems. Allow space for image layers, build cache, temporary checkouts/npm installs, database/artifact growth and virtual-disk expansion. A full host filesystem can stop Docker even while its guest reports free space. The build limits do not impose disk quotas.
+
 Install supported Node.js, Linux Docker Engine/Desktop and Compose v2. From the repository root:
 
 ```sh
@@ -63,6 +65,10 @@ Use [the Nginx example](../deploy/nginx.conf.example) as a starting point on a h
 The proxy must preserve the actual requested `Host`; Shipyard ignores forwarded-host routing headers and does not enable Express `trust proxy`. HTTPS cookie selection comes from `DASHBOARD_ORIGIN`, so set it to the real external HTTPS origin before starting the API. Unknown hosts are rejected. Nginx's [proxy header documentation](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_set_header) explains the upstream Host default that the example overrides.
 
 Validate your changed proxy config with `nginx -t`, then check the dashboard login, both origin boundaries, a published page, relative assets, restore and a signed delivery over HTTPS. Test that a project host cannot return `/api/session` or `/health`, and that its requests cannot read another project's management resources. The checked-in example has not been deployed or validated against your certificates/network.
+
+CI validates this example in a disposable loopback test using `npx tsx --env-file=.env scripts/proxy-demo.ts`, after the public deployment smoke. The runner generates an ephemeral private CA and SAN certificate, substitutes only the upstream address with the Compose service name, runs Nginx configuration validation, and checks real HTTPS with an explicitly trusted CA/SNI. It verifies rejection of untrusted and wrong-name certificates, secure session-cookie attributes, authenticated management, CSRF/host boundaries and every published artifact through both HTTPS routes. It temporarily recreates the API with test HTTPS origins, then restores its previous origins, removes its own proxy container and deletes test keys. Use disposable development services; it expects the smoke's `.tmp/public-demo.json` and the default `shipyard_default` network. It never installs a trusted root or disables TLS verification.
+
+[Recorded HTTPS evidence](RESULTS.md#https-proxy-verification) applies to the private-CA CI test. Browser cookie enforcement, public DNS/ingress, public certificate issuance/renewal and your deployment still require their own checks.
 
 The default `*.sites.localhost` setup is for local HTTP development. Normal project origins support local storage and version-scoped service workers; versions of a project share its origin. Dashboard-host fallback pages remain opaque-sandboxed. Do not place platform credentials in a published site or broaden service-worker scope to the dashboard.
 

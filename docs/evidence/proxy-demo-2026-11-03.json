@@ -1,0 +1,43 @@
+{
+  "kind": "loopback HTTPS/Nginx functional smoke with an explicit private test CA; no production certificate or DNS claim",
+  "recordedAt": "2026-11-03T18:33:43.064Z",
+  "platformSha": "b3a8e7a98bd5bd76fdf52a21583a0669c45e0a8c",
+  "proxy": {
+    "image": "nginx:1.30.6-alpine",
+    "digest": "nginx@sha256:0e52bd054126cdc040b1276c0af347aeb02a41b9cfe305d6094767ac30e97949",
+    "source": "deploy/nginx.conf.example",
+    "modification": "Upstream host only: 127.0.0.1 to Compose api",
+    "configSha256": "e2d9622ecb7c104d5ea80627e2bf512f44ab9d2871bc84d9f6dff052df6a4832",
+    "loopbackPort": 8443,
+    "tlsProtocol": "TLSv1.3",
+    "testCaFingerprint256": "15:58:E1:C0:4D:48:33:84:71:22:3B:02:1A:99:09:0C:F7:E4:BA:00:78:7C:65:0F:69:A9:73:F7:6D:9F:2D:04"
+  },
+  "deployment": {
+    "id": "f3eaded8-0683-4ff0-820d-45ed7d14edb7",
+    "projectId": "35a42b1b-a262-4084-840a-5db7e38dc0f4",
+    "files": 35,
+    "bytes": 3282526,
+    "commitSha": "cfda8c5841b6e57f644f19aa10c4329553162a15"
+  },
+  "checks": [
+    "nginx -t",
+    "trusted certificate and SNI",
+    "untrusted CA rejection",
+    "wrong SAN rejection",
+    "HTTPS health",
+    "Secure HttpOnly SameSite=Strict host-only __Host session",
+    "cookie-authenticated management",
+    "cross-origin mutation rejection",
+    "site-host API isolation",
+    "both HTTPS pinned routes: all file sizes/SHA-256 and CSP",
+    "unknown Host dropped",
+    "secure logout cookie clearing"
+  ],
+  "unchecked": [
+    "browser cookie enforcement and site JavaScript execution",
+    "public DNS/ingress",
+    "public CA issuance/renewal",
+    "production deployment",
+    "TLS capacity"
+  ]
+}

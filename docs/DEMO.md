@@ -179,7 +179,8 @@ Do not present the following as completed evidence merely because their procedur
 - Milestone 4 ownership, signed delivery, host routing and retention have the CI results linked in `PLAN.md`; browser interaction remains separate.
 - Public Git checkout through the fixed Docker recipe passed in CI; [RESULTS.md](RESULTS.md) records its one-run environment and timing.
 - Limited browser session/validation checks and two five-request benchmark bursts are recorded in `RESULTS.md`.
-- Successful project/site browser flows, HTTPS/proxy setup and sustained capacity still need recorded demonstrations.
+- The checked-in HTTPS/Nginx example passed a private-CA loopback smoke; `RESULTS.md` records its trust, cookie, routing and artifact checks.
+- Successful project/site browser flows, public DNS/certificate/ingress operation and sustained capacity still need recorded demonstrations.
 
 Database tokens and leases govern duplicate/recovery safety. Test evidence still applies only to the scenarios and infrastructure actually exercised.
 

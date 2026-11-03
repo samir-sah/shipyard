@@ -86,7 +86,7 @@ Implementation includes:
 - A manual dedicated-host deployment procedure covering credentials, HTTPS/DNS/proxy boundaries, health/log monitoring, backups, upgrades and failure handling. An example Nginx config uses operator-supplied certificates; TLS was not provisioned or deployed by these changes.
 - Isolated-schema SQL/security/webhook/retention tests, so maintenance test fixtures cannot tombstone existing development projects.
 
-All four implementation milestones are present. Final CI, the public Git-to-Docker smoke and two five-request benchmark bursts passed. Limited local browser session/validation checks also passed. Remaining work is successful project/site browser flows, a real HTTPS/proxy deployment, and sustained capacity measurements. These are not an additional feature milestone. Production reliability and hostile-code isolation remain unproven.
+All four implementation milestones are present. Final CI, the public Git-to-Docker smoke, two five-request benchmark bursts and a private-CA Nginx HTTPS smoke passed. Limited local browser session/validation checks also passed. Remaining work is successful project/site browser flows, public DNS/certificate/ingress operation, and sustained capacity measurements. These are not an additional feature milestone. Production reliability and hostile-code isolation remain unproven.
 
 Custom domains, additional build recipes, Kubernetes, and arbitrary backend applications remain deferred. Backend applications need a separate runtime lifecycle design.
 
@@ -176,6 +176,19 @@ Benchmark and limited browser verification, November 3, 2026:
 | Full successful project/site browser flow | Unavailable locally: Docker Desktop again failed at `sailor-ingest.sock`; temporary auth-only API invocation bypassed startup migrations/readiness and used public test credentials |
 
 [RESULTS.md](RESULTS.md) links durable raw benchmark JSON and browser screenshots, records exact hardware/cache/limits, and separates the two configurations from the earlier single smoke. Each configuration had five measured requests; p95 is its observed maximum. Maximum simultaneous ledger claims were 1 and 2, while peak Docker overlap/CPU/RAM were not measured. Browser tests did not create projects or execute the deployed site's JavaScript. DNS/TLS/proxy operation, sustained capacity and failure-recovery timing remain unverified. Temporary local servers/browser were closed after the manual checks.
+
+HTTPS proxy verification and local runtime follow-up, November 3, 2026 UTC:
+
+| Command/check | Actual outcome |
+| --- | --- |
+| `npm run typecheck` | Passed including the new HTTPS verification script |
+| [CI on `b3a8e7a`](https://github.com/samir-sah/shipyard/actions/runs/41694725753) | Passed clean install, type checks, 39 unit tests, build, Compose validation, 40 integration tests, public smoke and HTTPS proxy smoke |
+| `npx tsx --env-file=.env scripts/proxy-demo.ts` | Passed real Nginx config validation, private-CA/SNI/SAN checks, TLS 1.3, secure cookie attributes, authenticated management, CSRF and host boundaries, logout clearing and every artifact hash through both HTTPS routes |
+| Test cleanup | Restored prior API origins and removed owned proxy container/test keys |
+| Local Docker startup recovery | Engine 29.7.2 became available after preserving stale runtime endpoints; settings, images and data volumes were not reset |
+| Local full browser attempt | Incomplete: image build hit Go SIGBUS and host C: was confirmed full; local Docker/WSL returned to stopped state with its data preserved |
+
+[RESULTS.md](RESULTS.md) links the durable proxy report and records the failed first test-client framing check separately from the successful retry. No product code or Nginx configuration changed. Public DNS/certificate issuance/ingress, browser cookie enforcement and deployed JavaScript, sustained capacity and production guarantees remain unverified. Host capacity must be checked on Docker's actual data drive before local image pulls, even when the workspace has ample space elsewhere.
 
 ## Dependency decisions and official references
 
