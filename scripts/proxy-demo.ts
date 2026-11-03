@@ -79,7 +79,7 @@ async function main() {
         const outgoing = request({ hostname: '127.0.0.1', port: 8443, servername: options.servername ?? host,
           ca: options.trust === false ? undefined : ca, agent: false, path, method: options.method ?? 'GET',
           signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
-          headers: { Host: `${host}:8443`, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...options.headers },
+          headers: { Host: `${host}:8443`, ...(body === undefined ? {} : { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(body)) }), ...options.headers },
         }, incoming => {
           const chunks: Buffer[] = [];
           const socket = incoming.socket as TLSSocket;
