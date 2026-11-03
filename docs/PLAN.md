@@ -86,7 +86,7 @@ Implementation includes:
 - A manual dedicated-host deployment procedure covering credentials, HTTPS/DNS/proxy boundaries, health/log monitoring, backups, upgrades and failure handling. An example Nginx config uses operator-supplied certificates; TLS was not provisioned or deployed by these changes.
 - Isolated-schema SQL/security/webhook/retention tests, so maintenance test fixtures cannot tombstone existing development projects.
 
-All four implementation milestones are present. Final CI and the public Git-to-Docker recipe smoke passed, with results below. Remaining work is browser interaction, a real HTTPS/proxy deployment, and the benchmark workload on recorded hardware. These are not an additional feature milestone. Production reliability and hostile-code isolation remain unproven.
+All four implementation milestones are present. Final CI, the public Git-to-Docker smoke and two five-request benchmark bursts passed. Limited local browser session/validation checks also passed. Remaining work is successful project/site browser flows, a real HTTPS/proxy deployment, and sustained capacity measurements. These are not an additional feature milestone. Production reliability and hostile-code isolation remain unproven.
 
 Custom domains, additional build recipes, Kubernetes, and arbitrary backend applications remain deferred. Backend applications need a separate runtime lifecycle design.
 
@@ -163,6 +163,19 @@ Public Git-to-site verification, November 3, 2026:
 | Output verification | Every file size/SHA-256, manifest/commit identity, active selection, static entry references and CSP boundaries passed |
 
 The fixture's actual SHA matched reviewed `cfda8c5841b6e57f644f19aa10c4329553162a15`. [RESULTS.md](RESULTS.md) records environment, cache conditions, configured limits and durable sanitized evidence. This is a single functional smoke, not a capacity measurement. Existing crash/failure/ordering/rollback suites still use their documented deterministic fixtures. Browser execution, DNS/TLS/proxy operation and supported aggregate concurrency remain unchecked.
+
+Benchmark and limited browser verification, November 3, 2026:
+
+| Command/check | Actual outcome |
+| --- | --- |
+| Local `npm run typecheck` / `npx tsx --test test/benchmark.test.ts` | Passed; two tests cover statistics and claim-overlap boundaries |
+| [Manual CI on `5ceed5f`](https://github.com/samir-sah/shipyard/actions/runs/41690912612) | Passed clean install, type checking, 39 unit tests, build, Compose configuration, 40 integration tests, service readiness and real public smoke |
+| Benchmark at concurrency 1 | Baseline + warmup + 5/5 measured successes; 2.165 observed completions/minute; no failed/expired attempts or retries |
+| Benchmark at concurrency 2 | Baseline + warmup + 5/5 measured successes; 3.874 observed completions/minute; no failed/expired attempts or retries |
+| Browser session/validation/outage check | Passed invalid/valid test-key feedback, signed session across reload, invalid repository feedback, project-load error, logout across reload and visual inspection of the narrow default viewport |
+| Full successful project/site browser flow | Unavailable locally: Docker Desktop again failed at `sailor-ingest.sock`; temporary auth-only API invocation bypassed startup migrations/readiness and used public test credentials |
+
+[RESULTS.md](RESULTS.md) links durable raw benchmark JSON and browser screenshots, records exact hardware/cache/limits, and separates the two configurations from the earlier single smoke. Each configuration had five measured requests; p95 is its observed maximum. Maximum simultaneous ledger claims were 1 and 2, while peak Docker overlap/CPU/RAM were not measured. Browser tests did not create projects or execute the deployed site's JavaScript. DNS/TLS/proxy operation, sustained capacity and failure-recovery timing remain unverified. Temporary local servers/browser were closed after the manual checks.
 
 ## Dependency decisions and official references
 

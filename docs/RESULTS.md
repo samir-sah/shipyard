@@ -26,3 +26,43 @@ This one-run functional result establishes the supported recipe on this runner u
 A verified portfolio statement is:
 
 > Built a TypeScript Git-to-static-site platform with PostgreSQL publication guards, immutable S3 artifacts, worker leases, retries and rollback. Verified a public Vite checkout/build/deployment in CI under 1 CPU and 512 MiB limits, with every served artifact checked by SHA-256.
+
+## Limited local browser check
+
+On November 3, 2026, the in-app browser loaded the actual Vite dashboard on Windows at `http://127.0.0.1:5173/`. A temporary localhost process invoked the existing `createApp()` with the repository's public test-only authentication fixture. Normal startup migrations/readiness were bypassed for this check because Docker Desktop again failed before starting its Linux engine with `sailor-ingest.sock: The file cannot be accessed by the system.` No private operator key was used, no backing service was simulated and no project was created.
+
+Observed through actual browser interactions: an invalid key displayed `Invalid operator key`; a valid test key opened the dashboard; the signed session survived reload; a non-GitHub repository displayed the API validation error; unavailable backing services produced a project-load error; logout returned to sign-in and remained signed out after reload. Forms and controls were visually inspected in the narrow default browser viewport. Saved screenshots show [sign-in after logout](evidence/browser-signin-2026-11-03.jpg) and [the dashboard during the intentional backing-service outage](evidence/browser-outage-2026-11-03.jpg). These are manual observations, not automated browser regression tests. The temporary browser tab and both local test servers were closed afterward.
+
+Successful project/history/log/restore interactions and the deployed site's JavaScript were not exercised in this local browser check. The public Git-to-site evidence above remains the CI HTTP/checksum smoke. Production DNS/TLS/proxy and sustained capacity remain unverified.
+
+## Five-request benchmark bursts
+
+[Manual CI run 41690912612](https://github.com/samir-sah/shipyard/actions/runs/41690912612) passed at `5ceed5f4f964c0a91cdcf08d248f4628214e3c93` on November 3, 2026. It passed 39 unit tests, 40 integration tests, the public smoke, and both benchmark configurations. Each configuration completed a separate baseline, warmup and five measured deployments. All fourteen benchmark builds succeeded in one attempt; the measured ten created ten active selections. Every published file matched its size/SHA-256 and every deployment matched the reviewed fixture SHA.
+
+| Observed metric | Concurrency 1 | Concurrency 2 |
+| --- | --- | --- |
+| Measured successful deployments | 5/5 | 5/5 |
+| Terminal failures / failed attempts / expired attempts / retries | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 |
+| Active pointer changes | 5 | 5 |
+| Maximum simultaneous ledger claims | 1 | 2 |
+| Baseline elapsed after claim, s | 31.674 | 27.834 |
+| Warmup elapsed after claim, s | 26.151 | 28.648 |
+| Five-request submission window, ms | 23.529 | 45.240 |
+| Measured burst window, s | 138.583 | 77.448 |
+| Successful deployments/minute in that window | 2.165 | 3.874 |
+| Active pointer changes/minute in that window | 2.165 | 3.874 |
+| First queue wait median / p95, s | 56.970 / 110.612 | 25.144 / 49.074 |
+| Elapsed after first claim median / p95, s | 27.952 / 33.373 | 27.423 / 28.959 |
+| Creation-to-finish median / p95, s | 79.928 / 138.564 | 49.077 / 77.412 |
+
+Durable raw evidence: [concurrency 1](evidence/benchmark-1-2026-11-03.json) and [concurrency 2](evidence/benchmark-2-2026-11-03.json). Rows retain original deployment/attempt timestamps and exact millisecond values. The fixture emitted 35 files / 3,282,526 bytes each time. Its package-lock SHA-256 was `7ba1980db760e6f99cb1f3ae1d50fb7a35981d1251d80515a3202e2b072eb88f`.
+
+Both configurations ran sequentially on the same Intel Xeon Platinum 8573C runner with four allocated logical CPUs and 16,759,304,192 bytes RAM. Docker reported the same CPU/RAM allocation. Runtime versions were Linux `7.0.0-1017-azure`, host Node `v24.22.1`, builder Node `v24.22.2`, builder npm `11.19.1`, Docker `28.0.4` and Compose `2.38.2`. The filesystem capacity was 154,894,188,544 bytes; free space after the respective runs was 89,728,081,920 and 89,688,391,680 bytes. Disk medium and network bandwidth were not measured.
+
+Each configuration used one worker process, with each build limited to 1 CPU, 512 MiB, 128 PIDs and 300 seconds. Lease duration was 30 seconds and the attempt limit three. Submission used one configured operator via bearer API requests, with one new project/deployment per request. Retention was disabled; HTTPS was absent. The measured burst excluded its baseline/warmup. Every attempt had fresh work/npm storage, while image layers were already warm and network/registry/storage caches and host activity were uncontrolled. The API, database, Redis, SeaweedFS and worker maintenance shared the runner.
+
+Completion rate divides successful measured deployments by earliest measured creation to latest terminal finish in PostgreSQL. Later artifact verification/report writing is outside that window. Five samples make nearest-rank p95 equal to the observed maximum. The recorded claim overlap uses millisecond ledger timestamps; Docker overlap and CPU/RAM peaks were not sampled. The sequential configurations and uncontrolled caches do not establish a controlled speedup or sustained capacity. Failure/recovery timing and restore/webhook/retention latency remain unmeasured. Reproduction and the broader workload are in [BENCHMARK.md](BENCHMARK.md).
+
+A measured portfolio statement is:
+
+> Completed 10/10 public Vite deployments across two five-request CI bursts at worker concurrency 1 and 2, observing 2.16 and 3.87 completions/minute respectively under per-build 1 CPU / 512 MiB limits, with no retries and all served artifacts verified by SHA-256.

@@ -1,0 +1,283 @@
+{
+  "kind": "five-request burst on one worker; small-sample comparison, not sustained capacity",
+  "recordedAt": "2026-11-03T18:13:21.209Z",
+  "platformSha": "5ceed5f4f964c0a91cdcf08d248f4628214e3c93",
+  "fixture": {
+    "repo": "https://github.com/adrianhajdin/nike_landing_page.git",
+    "reviewedSha": "cfda8c5841b6e57f644f19aa10c4329553162a15",
+    "lockSha256": "7ba1980db760e6f99cb1f3ae1d50fb7a35981d1251d80515a3202e2b072eb88f"
+  },
+  "workload": {
+    "baseline": "One fresh work volume and npm cache, not a cold image/host",
+    "warmups": 1,
+    "measuredRequests": 5,
+    "submission": "Five sequential authenticated project-create requests without delay, one deployment per new project",
+    "submissionWindowMs": 23.52874200000224,
+    "users": 1,
+    "workerProcesses": 1,
+    "configuredConcurrency": 1,
+    "cache": "Every attempt uses a new work volume/npm cache; image/runtime layers already warm; network/registry/storage caches uncontrolled",
+    "otherProcesses": "API, PostgreSQL, Redis, SeaweedFS, runner and worker maintenance; other host activity uncontrolled",
+    "https": false,
+    "retentionDays": 0
+  },
+  "baseline": {
+    "deploymentId": "9cb39a7c-dbb7-4126-aa14-14e1ffbda84a",
+    "projectId": "39e510d3-ba12-4885-95ef-73e4ceba403f",
+    "status": "deployed",
+    "commitSha": "cfda8c5841b6e57f644f19aa10c4329553162a15",
+    "createdAt": "2026-11-03T18:10:01.995Z",
+    "startedAt": "2026-11-03T18:10:02.004Z",
+    "finishedAt": "2026-11-03T18:10:33.678Z",
+    "queueWaitMs": 8.265,
+    "buildDurationMs": 31674.008,
+    "endToEndMs": 31682.273,
+    "activated": true,
+    "output": {
+      "files": 35,
+      "bytes": 3282526
+    },
+    "attempts": [
+      {
+        "deploymentId": "9cb39a7c-dbb7-4126-aa14-14e1ffbda84a",
+        "attempt": 1,
+        "status": "completed",
+        "startedAt": "2026-11-03T18:10:02.004Z",
+        "finishedAt": "2026-11-03T18:10:33.678Z",
+        "operationalMs": 31674.298
+      }
+    ]
+  },
+  "warmup": {
+    "deploymentId": "05b675be-6ecd-4551-8671-52765f76ce8c",
+    "projectId": "f34e03e2-c598-472b-84e9-6131ffc177cb",
+    "status": "deployed",
+    "commitSha": "cfda8c5841b6e57f644f19aa10c4329553162a15",
+    "createdAt": "2026-11-03T18:10:34.295Z",
+    "startedAt": "2026-11-03T18:10:34.300Z",
+    "finishedAt": "2026-11-03T18:11:00.452Z",
+    "queueWaitMs": 4.902,
+    "buildDurationMs": 26151.479,
+    "endToEndMs": 26156.381,
+    "activated": true,
+    "output": {
+      "files": 35,
+      "bytes": 3282526
+    },
+    "attempts": [
+      {
+        "deploymentId": "05b675be-6ecd-4551-8671-52765f76ce8c",
+        "attempt": 1,
+        "status": "completed",
+        "startedAt": "2026-11-03T18:10:34.301Z",
+        "finishedAt": "2026-11-03T18:11:00.453Z",
+        "operationalMs": 26152.061
+      }
+    ]
+  },
+  "samples": [
+    {
+      "deploymentId": "7e472649-6ffe-4310-b442-d510119bcd36",
+      "projectId": "2bce50ee-4e96-4e47-8c72-9d58b0d6d0aa",
+      "status": "deployed",
+      "commitSha": "cfda8c5841b6e57f644f19aa10c4329553162a15",
+      "createdAt": "2026-11-03T18:11:01.554Z",
+      "startedAt": "2026-11-03T18:11:01.560Z",
+      "finishedAt": "2026-11-03T18:11:25.149Z",
+      "queueWaitMs": 5.797,
+      "buildDurationMs": 23589.607,
+      "endToEndMs": 23595.404,
+      "activated": true,
+      "output": {
+        "files": 35,
+        "bytes": 3282526
+      },
+      "attempts": [
+        {
+          "deploymentId": "7e472649-6ffe-4310-b442-d510119bcd36",
+          "attempt": 1,
+          "status": "completed",
+          "startedAt": "2026-11-03T18:11:01.560Z",
+          "finishedAt": "2026-11-03T18:11:25.150Z",
+          "operationalMs": 23590.033
+        }
+      ]
+    },
+    {
+      "deploymentId": "1c79cd80-579d-40fe-b1b0-5031aedbecd9",
+      "projectId": "079cefe3-c9a8-423f-b9ab-3c31ef794e0b",
+      "status": "deployed",
+      "commitSha": "cfda8c5841b6e57f644f19aa10c4329553162a15",
+      "createdAt": "2026-11-03T18:11:01.559Z",
+      "startedAt": "2026-11-03T18:11:25.155Z",
+      "finishedAt": "2026-11-03T18:11:58.528Z",
+      "queueWaitMs": 23595.739,
+      "buildDurationMs": 33373.488,
+      "endToEndMs": 56969.227,
+      "activated": true,
+      "output": {
+        "files": 35,
+        "bytes": 3282526
+      },
+      "attempts": [
+        {
+          "deploymentId": "1c79cd80-579d-40fe-b1b0-5031aedbecd9",
+          "attempt": 1,
+          "status": "completed",
+          "startedAt": "2026-11-03T18:11:25.155Z",
+          "finishedAt": "2026-11-03T18:11:58.529Z",
+          "operationalMs": 33374.23
+        }
+      ]
+    },
+    {
+      "deploymentId": "7181c711-7216-4295-b38e-4908d89dc023",
+      "projectId": "d86a9224-9326-4635-a73e-b21ebf0bda4f",
+      "status": "deployed",
+      "commitSha": "cfda8c5841b6e57f644f19aa10c4329553162a15",
+      "createdAt": "2026-11-03T18:11:01.564Z",
+      "startedAt": "2026-11-03T18:11:58.534Z",
+      "finishedAt": "2026-11-03T18:12:21.491Z",
+      "queueWaitMs": 56970.321,
+      "buildDurationMs": 22957.345,
+      "endToEndMs": 79927.666,
+      "activated": true,
+      "output": {
+        "files": 35,
+        "bytes": 3282526
+      },
+      "attempts": [
+        {
+          "deploymentId": "7181c711-7216-4295-b38e-4908d89dc023",
+          "attempt": 1,
+          "status": "completed",
+          "startedAt": "2026-11-03T18:11:58.534Z",
+          "finishedAt": "2026-11-03T18:12:21.492Z",
+          "operationalMs": 22957.967
+        }
+      ]
+    },
+    {
+      "deploymentId": "e8f132e4-2b3e-4400-8645-8d0c1e480d51",
+      "projectId": "53f6097e-538a-4649-87b6-120b8bc7b197",
+      "status": "deployed",
+      "commitSha": "cfda8c5841b6e57f644f19aa10c4329553162a15",
+      "createdAt": "2026-11-03T18:11:01.569Z",
+      "startedAt": "2026-11-03T18:12:21.496Z",
+      "finishedAt": "2026-11-03T18:12:52.181Z",
+      "queueWaitMs": 79927.311,
+      "buildDurationMs": 30684.322,
+      "endToEndMs": 110611.633,
+      "activated": true,
+      "output": {
+        "files": 35,
+        "bytes": 3282526
+      },
+      "attempts": [
+        {
+          "deploymentId": "e8f132e4-2b3e-4400-8645-8d0c1e480d51",
+          "attempt": 1,
+          "status": "completed",
+          "startedAt": "2026-11-03T18:12:21.497Z",
+          "finishedAt": "2026-11-03T18:12:52.181Z",
+          "operationalMs": 30684.839
+        }
+      ]
+    },
+    {
+      "deploymentId": "4017cbae-f193-4cd4-bd5b-4e5d1f90898b",
+      "projectId": "1a1a3554-f211-4b09-86be-ee550698e8da",
+      "status": "deployed",
+      "commitSha": "cfda8c5841b6e57f644f19aa10c4329553162a15",
+      "createdAt": "2026-11-03T18:11:01.573Z",
+      "startedAt": "2026-11-03T18:12:52.185Z",
+      "finishedAt": "2026-11-03T18:13:20.137Z",
+      "queueWaitMs": 110612.002,
+      "buildDurationMs": 27951.82,
+      "endToEndMs": 138563.822,
+      "activated": true,
+      "output": {
+        "files": 35,
+        "bytes": 3282526
+      },
+      "attempts": [
+        {
+          "deploymentId": "4017cbae-f193-4cd4-bd5b-4e5d1f90898b",
+          "attempt": 1,
+          "status": "completed",
+          "startedAt": "2026-11-03T18:12:52.186Z",
+          "finishedAt": "2026-11-03T18:13:20.138Z",
+          "operationalMs": 27952.519
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "submitted": 5,
+    "successes": 5,
+    "terminalFailures": 0,
+    "activePointerChanges": 5,
+    "completedAttempts": 5,
+    "failedAttempts": 0,
+    "expiredAttempts": 0,
+    "retries": 0,
+    "maxSimultaneousClaims": 1,
+    "claimOverlapMeaning": "Ledger operational intervals, millisecond timestamp resolution; not simultaneous Docker container counts",
+    "elapsedMs": 138583.008,
+    "window": "Earliest measured deployment creation to latest terminal finish in PostgreSQL",
+    "successfulDeploymentsPerMinute": 2.164767559382172,
+    "activePointerChangesPerMinute": 2.164767559382172,
+    "queueWaitMs": {
+      "samples": 5,
+      "median": 56970.321,
+      "p95": 110612.002
+    },
+    "buildDurationMs": {
+      "samples": 5,
+      "median": 27951.82,
+      "p95": 33373.488
+    },
+    "endToEndMs": {
+      "samples": 5,
+      "median": 79927.666,
+      "p95": 138563.822
+    },
+    "percentiles": "Median averages the two central samples when even; p95 is nearest rank, ceil(0.95*n). With five samples p95 equals the maximum; no population claim."
+  },
+  "environment": {
+    "os": "linux 7.0.0-1017-azure",
+    "cpu": "INTEL(R) XEON(R) PLATINUM 8573C",
+    "logicalCpus": 4,
+    "memoryBytes": 16759304192,
+    "hostNode": "v24.22.1",
+    "docker": "28.0.4",
+    "compose": "2.38.2",
+    "dockerAllocation": {
+      "cpus": 4,
+      "memoryBytes": 16759304192
+    },
+    "builderNode": "v24.22.2",
+    "builderNpm": "11.19.1",
+    "disk": {
+      "capacityBytes": 154894188544,
+      "availableBytesAfterRun": 89728081920,
+      "type": "Unmeasured"
+    }
+  },
+  "limits": {
+    "cpus": 1,
+    "memoryMb": 512,
+    "pids": 128,
+    "timeoutMs": 300000,
+    "leaseMs": 30000,
+    "maxAttempts": 3
+  },
+  "unchecked": [
+    "sustained supported capacity",
+    "peak CPU/memory and simultaneous Docker container counts",
+    "failure/recovery workload timing",
+    "restore/webhook/retention latency",
+    "browser and DNS/TLS/proxy",
+    "network bandwidth and cache state"
+  ]
+}

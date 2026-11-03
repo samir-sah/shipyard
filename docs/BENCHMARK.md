@@ -1,6 +1,6 @@
 # Benchmark and portfolio evidence
 
-**Capacity benchmark status: unmeasured.** A separate [single public deployment smoke](RESULTS.md) records actual timing, output and environment. It does not supply a repeated workload, percentiles or supported-concurrency result. Configuration limits are not measurements. Fill this report only from completed runs; keep raw results and failed attempts.
+**Small-burst comparison: measured at concurrency 1 and 2. Sustained capacity: unmeasured.** [RESULTS.md](RESULTS.md#five-request-benchmark-bursts) records ten measured deployments, raw evidence, timing distributions, finite-window rates and environment. Configuration limits are not capacity measurements. Fill future results only from completed runs; keep raw results and failed attempts.
 
 ## Record the environment
 
@@ -16,6 +16,33 @@ docker compose ps
 Also record host OS, CPU model/core count, host RAM, Docker VM CPU/RAM allocation, disk type/free space, platform commit SHA, fixture URL/commit, package-lock hash, artifact file count/bytes, and internet connection conditions. On Windows, `Get-CimInstance Win32_Processor` and `Get-CimInstance Win32_OperatingSystem` report CPU and memory information. On Linux, use `lscpu`, `free -h`, and `df -h`.
 
 ## Workload
+
+### Automated small-sample comparison
+
+The `checks` workflow accepts a manual dispatch. Its integration job starts disposable services, runs the normal tests/public smoke, then runs `scripts/benchmark.ts` with one Compose worker at concurrency 1. It recreates only that worker at concurrency 2 and repeats the workload. Push/PR runs keep the functional smoke and skip this benchmark.
+
+```sh
+gh workflow run ci.yml --ref main --repo samir-sah/shipyard
+```
+
+Each configuration runs one fresh-work-volume/npm-cache baseline, a separate warmup, and five new projects submitted without an intentional delay. Every project has one deployment, so each verified successful active pointer represents one activation. The two configurations require fourteen real builds in addition to the normal public smoke. The runner checks for an idle platform, a single Compose worker, matching concurrency, the reviewed fixture SHA and every published file's size/SHA-256. Its network/command work shares a ten-minute deadline per configuration.
+
+For a local disposable installation, the same explicit commands are:
+
+```sh
+WORKER_CONCURRENCY=1 npx tsx --env-file=.env scripts/benchmark.ts
+# Only after the first workload finishes:
+WORKER_CONCURRENCY=2 docker compose up -d --wait --no-deps --force-recreate worker
+WORKER_CONCURRENCY=2 npx tsx --env-file=.env scripts/benchmark.ts
+```
+
+The first command requires the running worker to be configured at concurrency 1. These are POSIX-shell examples; set the corresponding `$env:WORKER_CONCURRENCY` in PowerShell. The script accepts explicit `SHIPYARD_TOKEN` or reads the first generated `AUTH_USERS` key in memory. It creates projects and artifacts, so use disposable services. It never saves credentials in its report. To restore the development default after a local comparison, set concurrency back to 1 and recreate the worker after all jobs finish.
+
+The `benchmark` CI artifact contains `.tmp/benchmark-1.json` and `.tmp/benchmark-2.json`, retained for seven days. Each includes raw samples and attempt ledger rows, baseline/warmup, package-lock hash, runtime/machine limits and derived statistics. Throughput uses earliest measured creation to latest terminal finish in PostgreSQL, excluding baseline, warmup and later HTTP verification/report writing. Success, terminal failure, failed/expired attempts and active changes remain distinct. Timing distributions use successful samples. Median averages the middle two values when even; p95 uses nearest rank. With five observations, p95 is the maximum, not a reliable population estimate.
+
+Ledger interval overlap records simultaneous persisted claims, not Docker container overlap or sampled CPU/RAM peaks. Docker layers are already built and warmed by earlier CI steps. Every attempt still gets a fresh work volume/npm cache, while network, registry, storage and host activity are uncontrolled. Configurations run sequentially on the same runner, so this is a small burst comparison, not a sustained capacity or causal speedup claim. Terminal build failures are saved before the runner asserts success; infrastructure/deadline/integrity failures may stop before JSON exists. Such interrupted runs are incomplete evidence, not measured terminal failures.
+
+### Broader capacity workload
 
 Use the trusted small Vite fixture from `DEMO.md`. First measure one cold build with a previously unused builder image and empty npm cache. Then run a separate warmup and a named series of repeated builds. Each attempt has a fresh work volume and temporary npm cache; repeated deployments do not share a persistent npm install cache. Record whether image layers, filesystem, network, or S3 caches were warm. Do not mix cold and warm observations in one percentile.
 
@@ -42,7 +69,7 @@ Measure webhook acceptance separately from build completion: record valid unique
 
 For a retention workload, use dedicated disposable fixtures in an isolated schema/storage namespace. Record available/deleting/deleted counts, protected active/Keep/newest versions, eligible files/bytes, deletion duration and resumed tombstones. Do not turn on retention or backdate real development deployments to obtain measurements. Host routing, session isolation, ownership and retention correctness checks are functional evidence, not throughput or capacity measurements.
 
-## Results template
+## Results template for a future sustained workload
 
 | Metric | Result |
 | --- | --- |
@@ -86,7 +113,11 @@ Milestone 4 feature draft, subject to its actual final checks:
 
 > Added owner-scoped management with signed sessions, project-specific verified GitHub deliveries, separate project origins, and guarded retention that preserves active and explicitly kept rollback versions.
 
-Measurement draft; replace every placeholder from collected evidence before use:
+Verified small-sample measurement:
+
+> Completed 10/10 public Vite deployments across two five-request CI bursts at concurrency 1 and 2, with 2.16 and 3.87 observed completions/minute under per-build 1 CPU / 512 MiB limits, no retries, and SHA-256 verification of every served artifact.
+
+Future sustained-workload draft; replace every placeholder from collected evidence before use:
 
 > Completed [successful deployments]/[submitted deployments] Vite deployments using [worker processes/concurrency] on [hardware], with [median/p95] first queue wait and [median/p95] deployment elapsed time, including [failed/expired attempts] under [CPU/memory/time] limits.
 

@@ -178,7 +178,8 @@ Do not present the following as completed evidence merely because their procedur
 - Milestone 2 ordering/rollback and milestone 3 recovery cases have the CI results linked in `PLAN.md`; retain their exact infrastructure/scenario limits.
 - Milestone 4 ownership, signed delivery, host routing and retention have the CI results linked in `PLAN.md`; browser interaction remains separate.
 - Public Git checkout through the fixed Docker recipe passed in CI; [RESULTS.md](RESULTS.md) records its one-run environment and timing.
-- Browser interaction, HTTPS/proxy setup and the benchmark workload still need recorded demonstrations.
+- Limited browser session/validation checks and two five-request benchmark bursts are recorded in `RESULTS.md`.
+- Successful project/site browser flows, HTTPS/proxy setup and sustained capacity still need recorded demonstrations.
 
 Database tokens and leases govern duplicate/recovery safety. Test evidence still applies only to the scenarios and infrastructure actually exercised.
 
