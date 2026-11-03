@@ -41,6 +41,7 @@ jobs:
         run: npm run test:integration
         env:
           RUN_INTEGRATION: '1'
+          RUN_DOCKER_TESTS: '1'
       - name: Start platform API and worker
         run: docker compose up -d --wait api worker
       - name: Check API readiness and platform services

@@ -2,7 +2,7 @@
 
 Shipyard turns a supported public GitHub repository into a local static site. Submit a repository, follow its build logs, open an immutable deployment, and restore a completed version from the dashboard.
 
-This repository implements **milestones 1 and 2** of a self-hosted portfolio project. The API and worker use TypeScript/Node.js, the dashboard uses React/Vite, PostgreSQL stores deployment records, BullMQ/Redis queues builds, Docker runs the build recipe, and SeaweedFS provides S3-compatible artifact storage. Recovery after worker failure is the next milestone.
+This repository implements **milestones 1–3** of a self-hosted portfolio project. The API and worker use TypeScript/Node.js, the dashboard uses React/Vite, PostgreSQL stores deployment records and worker leases, BullMQ/Redis schedules build attempts, Docker runs the build recipe, and SeaweedFS provides S3-compatible artifact storage. Authentication, ownership, webhooks, separate site origins, and retention are the next milestone.
 
 ## Run locally
 
@@ -19,7 +19,7 @@ docker compose logs -f api worker
 
 In PowerShell, use `Copy-Item .env.example .env` instead of `cp` if preferred. Open [the dashboard](http://localhost:3000). The API and all development services bind only to the local machine. Named Docker volumes preserve metadata, queued jobs, and artifacts across restarts.
 
-The `builder` service is an image build target under the `tools` profile. Build it before submitting a deployment. Do not run that service directly; the worker creates one bounded container per deployment.
+The `builder` service is an image build target under the `tools` profile. Build it before submitting a deployment. Do not run that service directly; the worker creates one bounded container and named work volume per build attempt.
 
 Stop services with `docker compose down`. Avoid `docker compose down -v` when keeping deployment history: `-v` deletes the database, queue, and artifact volumes.
 
@@ -66,11 +66,11 @@ npm test
 npm run build
 ```
 
-Integration tests need running local services and the explicit `RUN_INTEGRATION=1` environment variable. See [the demo guide](docs/DEMO.md) for end-to-end verification and [the benchmark template](docs/BENCHMARK.md) for measurements. Test results actually collected in this implementation session are recorded in [the plan](docs/PLAN.md#verification-record).
+Integration tests need running local services and the explicit `RUN_INTEGRATION=1` environment variable. Docker resource/cleanup tests additionally require a working Linux Docker daemon and `RUN_DOCKER_TESTS=1`. See [the demo guide](docs/DEMO.md) for recovery and end-to-end verification and [the benchmark template](docs/BENCHMARK.md) for measurements. Actual results are recorded in [the plan](docs/PLAN.md#verification-record).
 
 ## Version selection and restore
 
-Deployments persist `queued`, `building`, `failed`, or `deployed` state, timestamps, logs, and artifact locations. Each stable deployment ID has an immutable S3 prefix. The worker validates the local output, uploads files without overwriting existing objects, reads them back to verify their actual SHA-256 and size, and writes a completion manifest last. Only a complete version can be recorded as a successful new deployment. Queue wait and build duration are recorded separately.
+Deployments persist `queued`, `building`, `failed`, or `deployed` state, timestamps, logs, attempt counts, and artifact selection. Each attempt writes an immutable S3 prefix under its stable deployment ID. The worker validates the local output, uploads without overwriting existing objects, reads files back to verify actual SHA-256 and size, and writes a completion manifest last. Only a complete version can become a successful new deployment. Queue wait and deployment elapsed time are recorded separately; the API field `buildDurationMs` includes retry waits and worker downtime after the first claim.
 
 **Latest requested build wins.** Creating a deployment advances the project's publication generation. A successful build changes the active pointer only if its generation is still current. If a newer request fails, an older build finishing later still cannot publish; the previously active site stays available. A superseded successful build remains `deployed` in history and can be opened or restored. The dashboard's **LIVE** marker identifies the active version.
 
@@ -78,9 +78,19 @@ Use **Restore** on a completed version, or send `POST /api/projects/<project-id>
 
 The stable `/sites/<slug>/` path returns a non-cacheable `302` redirect to `/versions/<slug>/<deployment-id>/`. Keep the stable link for the current release and the version link for a particular build.
 
-## Upgrade an existing milestone 1 installation
+## Worker recovery and retries
 
-Stop both application processes before updating. Old API/worker code does not honor publication generations, so mixed milestone 1 and milestone 2 processes are unsupported. Compose waits for the worker's current build within its configured shutdown grace period; investigate any forced stop before restarting.
+PostgreSQL grants each attempt a unique token and a 30-second lease, renewed every 10 seconds by default. Logs, commit pinning, failure transitions, and publication require the current unexpired token. A duplicate or stale queue delivery cannot claim a different expected attempt. BullMQ deduplication is useful, but the database is the authority.
+
+The worker scans expired leases and ready queued deployments every five seconds. Failures and expired claims retry up to `MAX_BUILD_ATTEMPTS=3`, with 1-second, 2-second, then exponentially increasing delays capped at 60 seconds when more attempts are configured. Builder and upload errors share this bounded retry policy; a deterministic bad build also consumes its attempts before becoming terminally `failed`.
+
+The first completed build pins its Git SHA before upload. Later attempts fetch that SHA. A crash before the SHA is recorded may resolve a newer `main` on retry. Each attempt has a separate token, Docker container/volume, temporary directory, and artifact prefix; stale uploads cannot overwrite the selected attempt's output or publish without the database fence.
+
+The build container also enforces its own deadline, with a 10-second forced-kill grace, even if its worker disappears. Normal completion cleans Docker resources and temporary files. A maintenance pass every 60 seconds removes abandoned labeled resources and failed/expired attempt prefixes, preserving active claims and selected/retained successful versions. Cleanup is bounded and best effort; crashes or a large backlog can leave resources until later passes. See [recovery and cleanup](docs/ARCHITECTURE.md#worker-leases-retries-and-cleanup).
+
+## Upgrade an existing milestone 1 or 2 installation
+
+Stop both application processes before updating. Old code lacks the current generation, lease-token, or attempt-prefix rules, so mixed application versions are unsupported. Compose waits for the worker's current attempt within its configured shutdown grace period; investigate any forced stop before restarting.
 
 ```sh
 docker compose stop api worker
@@ -89,14 +99,14 @@ docker compose --profile tools build
 docker compose up -d api worker
 ```
 
-Keep PostgreSQL, Redis, and storage running with their existing volumes. Back up persisted state before upgrading. Startup applies an additive migration: project/history IDs and the active pointer remain, while old deployment manifests start as `NULL`. Restoring an old successful version verifies its existing objects and lazily creates its completion manifest; incomplete or corrupt versions are rejected. See [migration compatibility](docs/ARCHITECTURE.md#migration-compatibility).
+Keep PostgreSQL, Redis, and storage running with their existing volumes. Back up persisted state before upgrading. Startup applies additive migrations: project/history IDs, existing manifests, and the active pointer remain. Migration 003 requeues old `building` rows after the coordinated stop. Milestone 1 versions without manifests retain their legacy read path; restore verifies the discoverable objects and lazily seals them. Existing milestone 2 root-prefix versions remain readable and restorable. See [migration compatibility](docs/ARCHITECTURE.md#migration-compatibility).
 
-An application downgrade also requires stopping **both** API and worker before checking out and rebuilding the older commit. Leave additive database columns intact; there is no automatic database downgrade. The old application loses milestone 2 ordering, restore, and immutable-write guarantees. Treat downgrading as a local operator procedure, not a supported mixed-version deployment.
+There is no automatic database or application downgrade. Older applications cannot read newly published milestone 3 attempt prefixes, even though the schema changes are additive. Any local downgrade requires stopping **both** API and worker and a compatibility or backup plan for the selected artifacts; checking out old code alone is insufficient. Do not mix tokenless old workers with the current application.
 
 ## Current limits
 
-Basic claims prevent simultaneous duplicate execution. Expiring claims, safe retries, worker recovery, stale-worker fencing, and abandoned-resource cleanup remain milestone 3. A killed worker may leave a `building` row, temporary Docker container, or incomplete unused artifact prefix requiring operator investigation.
+Recovery requires a running worker, reachable PostgreSQL/Redis/storage, and working Docker cleanup. Database fencing prevents stale publication; it does not stop an unreachable process instantly. Per-worker concurrency is not a strict machine-wide cap: an orphaned container can overlap a replacement until timeout or cleanup. A worker can clean only its own local temporary directories, while labeled containers/volumes are visible on its Docker daemon. Old unlabeled resources need operator review. Machine capacity remains unmeasured.
 
-This local demo has no authentication or ownership checks. Keep the ports bound to loopback. Build containers receive no platform secrets or Docker socket, but the worker itself controls the host Docker daemon. Artifact and log bounds do not bound checkout or dependency disk usage. There is no artifact retention policy yet.
+This local demo has no authentication or ownership checks. Keep ports bound to loopback. Build containers receive no platform secrets or Docker socket, but the worker controls the host Docker daemon. CPU, memory, PID, and per-attempt time limits do not bound checkout/dependency disk usage. Builds can access the network, deployment submission has no queue-growth quota, and successful artifact retention is unbounded. Use trusted repositories only.
 
 See [the architecture](docs/ARCHITECTURE.md), [milestones and remaining work](docs/PLAN.md), and [demo procedure](docs/DEMO.md). Custom domains, Kubernetes, arbitrary backend applications, and additional build recipes remain outside this first version.

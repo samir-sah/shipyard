@@ -22,6 +22,8 @@ export const config = {
   buildMemoryMb: positiveNumber('BUILD_MEMORY_MB', 512),
   buildPids: positiveNumber('BUILD_PIDS', 128),
   workerConcurrency: positiveNumber('WORKER_CONCURRENCY', 1),
+  workerLeaseMs: positiveNumber('WORKER_LEASE_MS', 30_000),
+  maxBuildAttempts: positiveNumber('MAX_BUILD_ATTEMPTS', 3),
   maxArtifactBytes: positiveNumber('MAX_ARTIFACT_BYTES', 64 * 1024 * 1024),
   maxArtifactFiles: positiveNumber('MAX_ARTIFACT_FILES', 5_000),
   maxLogBytes: positiveNumber('MAX_LOG_BYTES', 1024 * 1024),

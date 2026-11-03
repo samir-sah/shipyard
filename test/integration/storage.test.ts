@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, HeadObjectCommand, ListObjectsV2Command, PutObjectCommand } from '@aws-sdk/client-s3';
 import { config } from '../../src/config.js';
-import { s3, ensureBucket, uploadArtifacts, getArtifact, validateStoredVersion } from '../../src/storage.js';
+import { s3, ensureBucket, uploadArtifacts, getArtifact, validateStoredVersion, deleteAttemptArtifacts } from '../../src/storage.js';
 import type { ArtifactManifest } from '../../src/contracts.js';
 
 const marker = '__shipyard_manifest.json';
@@ -38,8 +38,8 @@ async function put(id: string, key: string, body: string): Promise<void> {
   await s3.send(new PutObjectCommand({ Bucket: config.s3Bucket, Key: `deployments/${id}/${key}`, Body: body, Metadata: { sha256: hash(body) } }));
 }
 
-async function readMarker(id: string): Promise<ArtifactManifest> {
-  const result = await s3.send(new GetObjectCommand({ Bucket: config.s3Bucket, Key: `deployments/${id}/${marker}` }));
+async function readMarker(id: string, token?: string): Promise<ArtifactManifest> {
+  const result = await s3.send(new GetObjectCommand({ Bucket: config.s3Bucket, Key: `deployments/${id}/${token ? `attempts/${token}/` : ''}${marker}` }));
   return JSON.parse(await result.Body!.transformToString()) as ArtifactManifest;
 }
 
@@ -105,6 +105,40 @@ test('S3 versions are complete, immutable and validated before reuse', { skip: p
       await uploadArtifacts(missingId, directory, AbortSignal.timeout(30_000));
       await s3.send(new DeleteObjectCommand({ Bucket: config.s3Bucket, Key: `deployments/${missingId}/assets/app.js` }));
       await assert.rejects(validateStoredVersion(missingId));
+    });
+    await t.test('isolates retries and deletes only the abandoned attempt across listing pages', async () => {
+      const id = nextId();
+      const first = randomUUID();
+      const second = randomUUID();
+      const commitSha = 'c'.repeat(40);
+      const root = await uploadArtifacts(id, directory);
+      await put(id, `attempts/${first}/index.html`, 'partial abandoned upload');
+      await assert.rejects(validateStoredVersion(id, { attemptId: first, allowLegacy: true }), /no completion manifest/);
+      const manifest = await uploadArtifacts(id, directory, AbortSignal.timeout(30_000), { token: second, commitSha });
+      assert.equal(manifest.attemptId, second);
+      assert.equal(manifest.commitSha, commitSha);
+      assert.deepEqual(await readMarker(id, second), manifest);
+      assert.deepEqual(await validateStoredVersion(id, { attemptId: second }), manifest);
+      assert.deepEqual(await validateStoredVersion(id, { expectedManifest: manifest }), manifest);
+      assert.equal(await (await getArtifact(id, 'index.html', second)).Body?.transformToString(), html);
+      await assert.rejects(uploadArtifacts(id, directory, AbortSignal.timeout(30_000), { token: second, commitSha }));
+      await assert.rejects(validateStoredVersion(id, { expectedManifest: { ...manifest, commitSha: 'd'.repeat(40) } }), /differs from the completed deployment/);
+      await assert.rejects(validateStoredVersion(id, { expectedManifest: manifest, attemptId: first }), /Conflicting artifact attempt IDs/);
+      await s3.send(new PutObjectCommand({ Bucket: config.s3Bucket, Key: `deployments/${id}/attempts/${first}/${marker}`, Body: JSON.stringify(manifest) }));
+      await assert.rejects(validateStoredVersion(id, { attemptId: first }), /does not match its attempt prefix/);
+      await deleteAttemptArtifacts(id, first);
+      await deleteAttemptArtifacts(id, first);
+      assert.deepEqual(await validateStoredVersion(id), root);
+      assert.deepEqual(await validateStoredVersion(id, { expectedManifest: manifest }), manifest);
+
+      for (let offset = 0; offset < 1002; offset += 20) {
+        await Promise.all(Array.from({ length: Math.min(20, 1002 - offset) }, (_, index) => put(id, `attempts/${first}/junk-${offset + index}`, 'x')));
+      }
+      await deleteAttemptArtifacts(id, first);
+      const leftovers = await s3.send(new ListObjectsV2Command({ Bucket: config.s3Bucket, Prefix: `deployments/${id}/attempts/${first}/` }));
+      assert.equal(leftovers.Contents?.length ?? 0, 0);
+      assert.deepEqual(await validateStoredVersion(id), root);
+      assert.deepEqual(await validateStoredVersion(id, { expectedManifest: manifest }), manifest);
     });
   } finally {
     try {

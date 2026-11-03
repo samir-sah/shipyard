@@ -6,9 +6,9 @@ Start with one usable public GitHub-to-static-site path. Preserve existing work;
 
 - TypeScript API and worker, React/Vite dashboard.
 - PostgreSQL is the source of truth for projects, deployment status, logs, timing, and active artifact selection.
-- BullMQ/Redis handles asynchronous scheduling. Stable deployment IDs are job IDs. A dispatcher re-enqueues persisted queued records if initial enqueueing fails.
-- Docker runs a fixed root-level Vite recipe on `main`: `npm ci`, then `npm run build -- --base=./`, publishing `dist/`.
-- S3-compatible storage holds immutable files and a completion manifest per deployment. SeaweedFS replaces MinIO for local development because current MinIO community distribution is source-only and legacy binary images are unmaintained.
+- BullMQ/Redis schedules jobs named `<deployment-id>-<expected-attempt>`. PostgreSQL expected-attempt checks and unexpired lease tokens are authoritative; a dispatcher reconstructs ready queued work.
+- Docker runs a fixed root-level Vite recipe on `main`: `npm ci`, then `npm run build -- --base=./`, publishing `dist/`. Retries use the recorded SHA after the first completed Docker build pins it.
+- S3-compatible storage holds immutable files and a completion manifest per attempt; the committed database manifest selects a successful version. SeaweedFS replaces MinIO for local development because current MinIO community distribution is source-only and legacy binary images are unmaintained.
 - PostgreSQL publication generations enforce latest-requested-build ordering and reversible active selection. A superseded successful build remains retained in history.
 - Local `/sites/<slug>/` paths redirect to pinned `/versions/<slug>/<deployment-id>/` paths. Sandbox headers restrict deployed documents while dashboard and site paths share an origin.
 - Trusted repositories only for the initial demo. Limits reduce accidental resource use; they do not establish safe hostile-code isolation.
@@ -53,11 +53,25 @@ Implementation is present; the verification record distinguishes completed check
 
 ## Milestone 3 — recovery and execution safety
 
-**Next incomplete milestone.** Add expiring worker claims, claim renewal, fencing tokens, safe retries, duplicate delivery tests, and worker termination recovery. Prove that stale workers cannot publish after a claim changes. Project publication generations are not worker-ownership fencing. Recover abandoned temporary workspaces/containers and clean incomplete artifact prefixes. Review timeouts, shutdown, queue growth, checkout/dependency disk limits, and host capacity. Keep the Docker socket and platform credentials out of every build container.
+Implementation includes:
+
+- Persisted UUID claim tokens, 30-second leases, heartbeat renewal every lease/3, and expected-attempt checks. Duplicate/stale deliveries cannot claim or publish through database guards.
+- Token/expiry checks on attempt logs, commit pinning, failure transitions, and publication, independently of project publication generations.
+- Bounded retries for builder/upload errors and expired claims: three total attempts by default, with exponential backoff starting at one second and capped at 60 seconds.
+- Five-second expired-claim recovery and ready-queue reconstruction. Job IDs include the expected attempt, with PostgreSQL remaining authoritative over queue records.
+- A `build_attempts` ledger with `building`, `completed`, `failed`, and `expired` states, plus deployment `attemptCount` in API history.
+- Git SHA pinning after the first Docker build finishes and before upload. Later attempts fetch the pin; a crash before pinning may still resolve newer `main`.
+- Isolated immutable `deployments/<id>/attempts/<token>/` prefixes, completion markers last, and database-selected manifests containing attempt/commit identity. Milestone 1/2 root-prefix reads and rollback remain compatible.
+- Unique labeled Docker containers/named volumes and token-prefixed temporary workspaces. Normal cleanup runs even after lease cancellation; cleanup errors do not mask successful upload results.
+- Bounded maintenance every 60 seconds for abandoned Docker/local resources and failed/expired attempt objects. Selected and retained successful versions are preserved; retired S3 attempts rotate for repeat cleanup of late obsolete writes.
+- Additive migration 003 that preserves completed history/active selection and requeues old building rows after a coordinated API/worker stop. Mixed tokenless old workers are unsupported.
+- Tests for duplicate expected attempts, expired/stale fences, retry exhaustion, commit consistency, crash/upload boundaries, and cleanup/resource limits. The crash harness uses real PostgreSQL/S3 and a killed child process with a fake builder; it is not a public Git checkout demonstration.
+
+The existing UI shows attempts through build logs; no separate attempt-history screen was added. No dependencies were added. Full public Git recipe, browser, throughput, and supported-concurrency evidence remain separate verification work. Checkout/npm disk quotas, request growth limits, and hostile-code isolation are not implemented.
 
 ## Milestone 4 — integration and operation
 
-Add signed GitHub webhooks and idempotent event handling, separate site origins with host-based routing, project ownership checks, retention preserving active/rollback versions, and a documented deployment procedure. Reassess browser isolation when sites receive separate origins. Add operational monitoring and authentication before exposing the platform beyond local development.
+**Next incomplete milestone.** Add signed GitHub webhooks and idempotent event handling, separate site origins with host-based routing, project ownership checks, retention preserving active/rollback versions, and a documented deployment procedure. Reassess browser isolation when sites receive separate origins. Add operational monitoring and authentication before exposing the platform beyond local development.
 
 Custom domains, additional build recipes, Kubernetes, and arbitrary backend applications remain deferred. Backend applications need a separate runtime lifecycle design.
 
@@ -91,7 +105,22 @@ Milestone 2 local checks actually run during implementation:
 
 CI verified image builds, SeaweedFS readiness and conditional writes, actual PostgreSQL concurrency/migration behavior, checksum validation, version serving, rollback rejection of altered artifacts, and API/worker startup. The HTTP suite publishes prepared local artifacts through the storage and selection code; a complete public Git checkout through the Docker builder still needs the `docs/DEMO.md` procedure. Docker resource enforcement and browser interaction remain unverified. No throughput or capacity measurements were collected.
 
-Out-of-order completion and rollback-overlap checks now belong to the milestone 2 integration suite. Duplicate delivery across retry/crash boundaries and worker termination during upload remain milestone 3 evidence. Measure queue wait, build duration, throughput, failures, and concurrency on recorded hardware; do not infer capacity from configuration defaults.
+Milestone 3 checks actually run so far:
+
+| Command/check | Actual outcome |
+| --- | --- |
+| `npx tsx --test test/build.test.ts test/process.test.ts` | 9 passed: process cancellation/timeouts, isolated resource arguments, cleanup after abort/deadline, and cleanup-error handling |
+| Server and test TypeScript checks | Passed during build-execution implementation |
+| Fixed builder recipe `sh -n` | Passed syntax-only check |
+| `npm run typecheck` | Passed dashboard, server, scripts and test type checking |
+| `npm test` | 25 passed, 0 failed, 1 skipped because Windows denied symlink creation |
+| `npm run build` / `docker compose config --quiet` | Both passed |
+| Milestone 3 PostgreSQL/Redis/S3/Docker integration | Pending CI verification; no result claimed here |
+| Public Git recipe, browser interaction, performance | Not verified by the milestone 3 focused checks |
+
+The new crash tests pause actual S3 upload or completion-marker handling and terminate a child worker, then exercise lease recovery and publication fencing. Docker resource inspection/janitor tests require `RUN_DOCKER_TESTS=1`. Their presence does not claim a passing run; record results only after execution. The existing milestone 2 CI image/readiness evidence above remains historical.
+
+Measure first queue wait, deployment elapsed time, per-attempt intervals, retry/recovery delay, throughput, failures, and concurrency on recorded hardware. `buildDurationMs` now includes retry wait and downtime between first claim and terminal completion; it is not a CPU-build measurement. Do not infer capacity from configuration defaults or test durations.
 
 ## Dependency decisions and official references
 

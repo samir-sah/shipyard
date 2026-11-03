@@ -5,7 +5,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { config } from '../src/config.js';
-import { inspectArtifacts, parseArtifactManifest, uploadArtifacts } from '../src/storage.js';
+import { deleteAttemptArtifacts, getArtifact, inspectArtifacts, parseArtifactManifest, uploadArtifacts } from '../src/storage.js';
 import type { ArtifactManifest } from '../src/contracts.js';
 
 const deploymentId = '0f85a743-22bb-4cde-b162-11783d69d5a0';
@@ -27,6 +27,31 @@ test('accepts a complete deployment manifest, including an empty artifact file',
   input.files[1].size = 0;
   input.totalBytes = 12;
   assert.deepEqual(parseArtifactManifest(input, deploymentId), input);
+});
+
+test('accepts legacy manifests and requires a valid attempt ID and pinned commit together', () => {
+  const input = { ...manifest(), attemptId: randomUUID(), commitSha: 'c'.repeat(40) };
+  assert.deepEqual(parseArtifactManifest(input, deploymentId), input);
+  for (const fields of [
+    { attemptId: input.attemptId }, { commitSha: input.commitSha },
+    { attemptId: 'invalid', commitSha: input.commitSha },
+    { attemptId: null, commitSha: input.commitSha },
+    { attemptId: input.attemptId, commitSha: 'c'.repeat(39) },
+    { attemptId: input.attemptId, commitSha: 'z'.repeat(40) },
+    { attemptId: input.attemptId, commitSha: null },
+  ]) assert.throws(() => parseArtifactManifest({ ...manifest(), ...fields }, deploymentId));
+});
+
+test('rejects invalid attempt prefixes and cancels cleanup before S3 I/O', async () => {
+  const token = randomUUID();
+  assert.throws(() => getArtifact(deploymentId, 'index.html', '../other'));
+  await assert.rejects(deleteAttemptArtifacts(deploymentId, '../other'));
+  await assert.rejects(deleteAttemptArtifacts('invalid', token));
+  await assert.rejects(deleteAttemptArtifacts(deploymentId, undefined as unknown as string));
+  const reason = new Error('cleanup cancelled before I/O');
+  await assert.rejects(deleteAttemptArtifacts(deploymentId, token, AbortSignal.abort(reason)), error => error === reason);
+  await assert.rejects(uploadArtifacts(deploymentId, 'does-not-exist', undefined, { token: 'invalid', commitSha: 'a'.repeat(40) }), /Invalid ID/);
+  await assert.rejects(uploadArtifacts(deploymentId, 'does-not-exist', undefined, { token, commitSha: 'bad' }), /Invalid artifact commit/);
 });
 
 test('rejects malformed manifests before trusting their version or paths', () => {

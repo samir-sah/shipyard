@@ -142,12 +142,12 @@ export function createApp() {
       key = 'index.html';
     }
     let artifact;
-    try { artifact = await getArtifact(deploymentId, key); }
+    try { artifact = await getArtifact(deploymentId, key, manifest?.attemptId); }
     catch (error) {
       if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode !== 404) throw error;
       if (extname(key)) { res.status(404).send('Artifact not found'); return; }
       key = 'index.html';
-      artifact = await getArtifact(deploymentId, key);
+      artifact = await getArtifact(deploymentId, key, manifest?.attemptId);
     }
     // Path-hosted sites need an opaque origin so their scripts cannot access the dashboard or its API.
     res.setHeader('Content-Security-Policy', 'sandbox allow-scripts allow-forms allow-popups allow-downloads; object-src \'none\'');

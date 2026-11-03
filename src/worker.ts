@@ -1,76 +1,54 @@
 import { Worker } from 'bullmq';
 import { config } from './config.js';
-import { pool, migrate, appendLog, claimDeployment, activateDeployment, failDeployment } from './db.js';
+import { pool, migrate, recoverExpiredClaims } from './db.js';
 import { connectionOptions, queueName, queue, dispatchQueued } from './queue.js';
-import { ensureBucket, uploadArtifacts, s3 } from './storage.js';
-import { buildRepository } from './build.js';
+import { ensureBucket, s3 } from './storage.js';
 import { requireUuid } from './validation.js';
-import type { ArtifactManifest } from './contracts.js';
-
-async function deploy(id: string): Promise<void> {
-  const repoUrl = await claimDeployment(id);
-  if (!repoUrl) return;
-  let pendingLogs = Promise.resolve();
-  let bytes = 0;
-  const log = (stream: 'stdout' | 'stderr' | 'system', message: string) => {
-    if (bytes > config.maxLogBytes) return;
-    bytes += Buffer.byteLength(message);
-    pendingLogs = pendingLogs.then(() => appendLog(id, stream, message));
-    // Attach a handler immediately; the awaited chain still reports persistence failures below.
-    void pendingLogs.catch(() => {});
-  };
-  let publication: 'active' | 'superseded' | null = null;
-  try {
-    let commitSha = '';
-    let manifest: ArtifactManifest | undefined;
-    await buildRepository(id, repoUrl, log, async (directory, sha, signal) => {
-      manifest = await uploadArtifacts(id, directory, signal);
-      commitSha = sha;
-    });
-    await pendingLogs;
-    if (!manifest) throw new Error('Build did not produce a complete artifact version');
-    publication = await activateDeployment(id, commitSha, manifest);
-    if (!publication) throw new Error('Deployment is no longer building');
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await pendingLogs.catch(logError => console.error('Could not persist build logs', logError));
-    await failDeployment(id, message);
-    await appendLog(id, 'system', `Deployment failed: ${message}\n`).catch(console.error);
-    throw error;
-  }
-  await appendLog(id, 'system', publication === 'active' ? 'Deployment is live.\n' : 'Build retained as a version. A newer deployment request or rollback controls the active site.\n').catch(error => console.error('Could not persist completion log', error));
-}
+import { deploy } from './deployment.js';
+import { cleanupBuildResources } from './cleanup.js';
 
 await migrate();
 await ensureBucket();
 const worker = new Worker(queueName, async job => {
-  const id = job.data?.deploymentId;
-  if (typeof id !== 'string') throw new Error('Invalid deployment job');
-  await deploy(requireUuid(id));
+  const { deploymentId, expectedAttempt } = job.data ?? {};
+  if (typeof deploymentId !== 'string' || !Number.isSafeInteger(expectedAttempt) || expectedAttempt < 1) throw new Error('Invalid deployment job');
+  await deploy(requireUuid(deploymentId), expectedAttempt);
 }, {
   connection: { ...connectionOptions, maxRetriesPerRequest: null, enableOfflineQueue: true },
   concurrency: config.workerConcurrency,
   maxStalledCount: 0,
 });
 worker.on('error', error => console.error('Worker error', error));
-worker.on('failed', (job, error) => console.error(`Deployment ${job?.id} failed`, error.message));
-let dispatching = false;
-async function dispatch(): Promise<void> {
-  if (dispatching) return;
-  dispatching = true;
-  try { await dispatchQueued(); }
-  catch (error) { console.error('Queue dispatch failed; retrying in five seconds', error); }
-  finally { dispatching = false; }
+worker.on('failed', (job, error) => console.error(`Deployment attempt ${job?.id} failed`, error.message));
+let dispatching: Promise<void> | undefined;
+function dispatch(): Promise<void> {
+  if (dispatching) return dispatching;
+  dispatching = (async () => {
+    await recoverExpiredClaims();
+    await dispatchQueued();
+  })().catch(error => console.error('Recovery/dispatch failed; retrying in five seconds', error)).finally(() => { dispatching = undefined; });
+  return dispatching;
+}
+const cleanupController = new AbortController();
+let cleaning: Promise<void> | undefined;
+function clean(): Promise<void> {
+  if (cleaning) return cleaning;
+  cleaning = cleanupBuildResources(cleanupController.signal).catch(error => { if (!cleanupController.signal.aborted) console.error('Cleanup failed', error); }).finally(() => { cleaning = undefined; });
+  return cleaning;
 }
 await dispatch();
+void clean();
 const timer = setInterval(() => { void dispatch(); }, 5_000);
-console.log(`Worker ready: concurrency=${config.workerConcurrency}, cpus=${config.buildCpus}, memory=${config.buildMemoryMb} MiB, timeout=${config.buildTimeoutMs} ms`);
+const cleanupTimer = setInterval(() => { void clean(); }, 60_000);
+console.log(`Worker ready: concurrency=${config.workerConcurrency}, cpus=${config.buildCpus}, memory=${config.buildMemoryMb} MiB, timeout=${config.buildTimeoutMs} ms, lease=${config.workerLeaseMs} ms, maxAttempts=${config.maxBuildAttempts}`);
 let shuttingDown = false;
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   clearInterval(timer);
-  await worker.close();
+  clearInterval(cleanupTimer);
+  cleanupController.abort(new Error('Worker shutting down'));
+  await Promise.all([worker.close(), dispatching, cleaning]);
   await queue.close();
   await pool.end();
   s3.destroy();

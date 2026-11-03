@@ -22,11 +22,21 @@ export const queue = new Queue(queueName, {
 });
 queue.on('error', error => console.error('Build queue error', error));
 
-export async function enqueueDeployment(id: string): Promise<void> {
-  await queue.add('build', { deploymentId: id }, { jobId: id });
+export async function enqueueDeployment(id: string, targetQueue = queue): Promise<void> {
+  const result = await pool.query<{ expected_attempt: number }>("SELECT attempt_count + 1 AS expected_attempt FROM deployments WHERE id = $1 AND status = 'queued' AND retry_at <= clock_timestamp()", [id]);
+  if (!result.rowCount) return;
+  const expectedAttempt = result.rows[0].expected_attempt;
+  const jobId = `${id}-${expectedAttempt}`;
+  const existing = await targetQueue.getJob(jobId);
+  if (existing) {
+    const state = await existing.getState();
+    if (state !== 'completed' && state !== 'failed') return;
+    await existing.remove();
+  }
+  await targetQueue.add('build', { deploymentId: id, expectedAttempt }, { jobId });
 }
 
-export async function dispatchQueued(): Promise<void> {
-  const result = await pool.query<{ id: string }>("SELECT id FROM deployments WHERE status = 'queued' ORDER BY created_at LIMIT 100");
-  for (const row of result.rows) await enqueueDeployment(row.id);
+export async function dispatchQueued(targetQueue = queue): Promise<void> {
+  const result = await pool.query<{ id: string }>("SELECT id FROM deployments WHERE status = 'queued' AND retry_at <= clock_timestamp() ORDER BY retry_at, created_at LIMIT 100");
+  for (const row of result.rows) await enqueueDeployment(row.id, targetQueue);
 }

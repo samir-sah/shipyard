@@ -2,12 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { pool, migrate, createDeployment, claimDeployment, activateDeployment, rollbackDeployment, failDeployment, appendLog } from '../../src/db.js';
+import { pool, migrate, createDeployment, claimDeployment, recordDeploymentCommit, activateDeployment, rollbackDeployment, failDeployment, appendLog } from '../../src/db.js';
 import { config } from '../../src/config.js';
-import type { ArtifactManifest, Deployment } from '../../src/contracts.js';
+import type { ArtifactManifest, Deployment, DeploymentClaim } from '../../src/contracts.js';
+
+const claimsById = new Map<string, DeploymentClaim>();
 
 function manifest(id: string): ArtifactManifest {
-  return { version: 1, deploymentId: id, files: [{ key: 'index.html', size: 2, sha256: 'f'.repeat(64) }], totalBytes: 2 };
+  const claim = claimsById.get(id);
+  return { version: 1, deploymentId: id, attemptId: claim?.token ?? '00000000-0000-0000-0000-000000000000', commitSha: claim?.commitSha ?? 'a'.repeat(40), files: [{ key: 'index.html', size: 2, sha256: 'f'.repeat(64) }], totalBytes: 2 };
 }
 
 test('version selection, rollback and persistence use real PostgreSQL transactions', { skip: process.env.RUN_INTEGRATION !== '1' }, async t => {
@@ -24,8 +27,19 @@ test('version selection, rollback and persistence use real PostgreSQL transactio
     return deployment;
   }
   async function complete(deployment: Deployment) {
-    assert.equal(await claimDeployment(deployment.id), 'https://github.com/example/site.git');
-    return activateDeployment(deployment.id, 'a'.repeat(40), manifest(deployment.id));
+    assert.equal((await claim(deployment.id))?.repoUrl, 'https://github.com/example/site.git');
+    return publish(deployment.id, 'a'.repeat(40));
+  }
+  async function claim(id: string) {
+    const result = await claimDeployment(id, 1);
+    if (result) claimsById.set(id, result);
+    return result;
+  }
+  async function publish(id: string, sha: string) {
+    const claim = claimsById.get(id);
+    const token = claim?.token ?? '00000000-0000-0000-0000-000000000000';
+    if (claim && await recordDeploymentCommit(id, token, sha)) claim.commitSha = sha;
+    return activateDeployment(id, token, sha, { ...manifest(id), commitSha: sha });
   }
   async function state(projectId: string) {
     const result = await pool.query<{ active_deployment_id: string | null; publish_generation: string }>('SELECT active_deployment_id, publish_generation FROM projects WHERE id = $1', [projectId]);
@@ -38,15 +52,16 @@ test('version selection, rollback and persistence use real PostgreSQL transactio
     await t.test('duplicate claims and completion are guarded; failure preserves the active version; logs remain bounded', async () => {
       const projectId = await project();
       const first = await queued(projectId);
-      assert.equal(await activateDeployment(first.id, 'a'.repeat(40), manifest(first.id)), null);
-      const claims = await Promise.all([claimDeployment(first.id), claimDeployment(first.id)]);
+      assert.equal(await publish(first.id, 'a'.repeat(40)), null);
+      const claims = await Promise.all([claim(first.id), claim(first.id)]);
       assert.equal(claims.filter(Boolean).length, 1);
-      assert.equal(await activateDeployment(first.id, 'a'.repeat(40), manifest(first.id)), 'active');
-      assert.equal(await activateDeployment(first.id, 'b'.repeat(40), manifest(first.id)), null);
-      assert.equal(await failDeployment(first.id, 'late failure'), false);
+      assert.equal(await publish(first.id, 'a'.repeat(40)), 'active');
+      assert.equal(await publish(first.id, 'b'.repeat(40)), null);
+      assert.equal(await failDeployment(first.id, claimsById.get(first.id)!.token, 'late failure'), null);
       const failed = await queued(projectId);
-      await claimDeployment(failed.id);
-      assert.equal(await failDeployment(failed.id, 'npm build failed'), true);
+      const failedClaim = await claim(failed.id);
+      assert.ok(failedClaim);
+      assert.equal(await failDeployment(failed.id, failedClaim.token, 'npm build failed'), config.maxBuildAttempts > 1 ? 'retry' : 'failed');
       assert.equal((await state(projectId)).active_deployment_id, first.id);
       await appendLog(failed.id, 'stdout', 'binary\0output');
       const sanitized = await pool.query('SELECT message FROM deployment_logs WHERE deployment_id = $1', [failed.id]);
@@ -63,9 +78,9 @@ test('version selection, rollback and persistence use real PostgreSQL transactio
       const projectId = await project();
       const a = await queued(projectId);
       const b = await queued(projectId);
-      await Promise.all([claimDeployment(a.id), claimDeployment(b.id)]);
-      assert.equal(await activateDeployment(b.id, 'b'.repeat(40), manifest(b.id)), 'active');
-      assert.equal(await activateDeployment(a.id, 'a'.repeat(40), manifest(a.id)), 'superseded');
+      await Promise.all([claim(a.id), claim(b.id)]);
+      assert.equal(await publish(b.id, 'b'.repeat(40)), 'active');
+      assert.equal(await publish(a.id, 'a'.repeat(40)), 'superseded');
       assert.equal((await state(projectId)).active_deployment_id, b.id);
       const retained = await pool.query('SELECT status, artifact_manifest FROM deployments WHERE id = $1', [a.id]);
       assert.equal(retained.rows[0].status, 'deployed');
@@ -78,9 +93,9 @@ test('version selection, rollback and persistence use real PostgreSQL transactio
       assert.equal(await complete(initial), 'active');
       const a = await queued(projectId);
       const b = await queued(projectId);
-      await Promise.all([claimDeployment(a.id), claimDeployment(b.id)]);
-      await failDeployment(b.id, 'Latest build failed');
-      assert.equal(await activateDeployment(a.id, 'a'.repeat(40), manifest(a.id)), 'superseded');
+      await Promise.all([claim(a.id), claim(b.id)]);
+      await failDeployment(b.id, claimsById.get(b.id)!.token, 'Latest build failed');
+      assert.equal(await publish(a.id, 'a'.repeat(40)), 'superseded');
       assert.equal((await state(projectId)).active_deployment_id, initial.id);
     });
 
@@ -91,10 +106,10 @@ test('version selection, rollback and persistence use real PostgreSQL transactio
       const current = await queued(projectId);
       await complete(current);
       const overlapping = await queued(projectId);
-      await claimDeployment(overlapping.id);
+      await claim(overlapping.id);
       const rolledBack = await rollbackDeployment(projectId, initial.id, manifest(initial.id));
       assert.equal(rolledBack?.activeDeploymentId, initial.id);
-      assert.equal(await activateDeployment(overlapping.id, 'c'.repeat(40), manifest(overlapping.id)), 'superseded');
+      assert.equal(await publish(overlapping.id, 'c'.repeat(40)), 'superseded');
       assert.equal((await state(projectId)).active_deployment_id, initial.id);
       const next = await queued(projectId);
       assert.equal(await complete(next), 'active');
@@ -127,9 +142,9 @@ test('version selection, rollback and persistence use real PostgreSQL transactio
       const current = await queued(projectId);
       await complete(current);
       const overlapping = await queued(projectId);
-      await claimDeployment(overlapping.id);
+      await claim(overlapping.id);
       const [completed, rolledBack] = await Promise.all([
-        activateDeployment(overlapping.id, 'c'.repeat(40), manifest(overlapping.id)),
+        publish(overlapping.id, 'c'.repeat(40)),
         rollbackDeployment(projectId, initial.id, manifest(initial.id)),
       ]);
       assert.ok(completed === 'active' || completed === 'superseded');

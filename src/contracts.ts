@@ -3,6 +3,8 @@ export type DeploymentStatus = 'queued' | 'building' | 'failed' | 'deployed';
 export interface ArtifactManifest {
   version: 1;
   deploymentId: string;
+  attemptId?: string;
+  commitSha?: string;
   files: Array<{ key: string; size: number; sha256: string }>;
   totalBytes: number;
 }
@@ -29,6 +31,15 @@ export interface Deployment {
   queueWaitMs: number | null;
   buildDurationMs: number | null;
   logTruncated: boolean;
+  attemptCount: number;
+}
+
+export interface DeploymentClaim {
+  deploymentId: string;
+  token: string;
+  repoUrl: string;
+  attempt: number;
+  commitSha: string | null;
 }
 
 export interface DeploymentLog {
