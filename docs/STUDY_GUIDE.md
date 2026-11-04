@@ -2,6 +2,8 @@
 
 This guide describes the implementation at commit `7b67df5`. It separates implemented behavior from observations and proposed improvements. Start with the overview, trace one deployment, then use the questions to practice explaining the design in your own words.
 
+For question-by-question sample answers, see [INTERVIEW_ANSWERS.md](INTERVIEW_ANSWERS.md).
+
 ## 1. What Shipyard does
 
 Shipyard is a self-hosted platform that turns a supported public GitHub repository into a static website. An operator submits a repository; Shipyard queues a deployment, builds it in a Docker container, stores the resulting files, and serves the selected version. A dashboard shows progress, history and logs. Operators can restore an earlier version without rebuilding it.
