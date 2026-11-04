@@ -70,6 +70,8 @@ Changing the build script deliberately is part of the fixture setup; do not brea
 4. Reload the stable site link. It must redirect to A. Open B's version link and confirm its HTML/assets still belong to B.
 5. Restore B again if desired. Restore is reversible and does not create a new build or erase history.
 
+For a trusted third-party fixture you do not control, redeploying the same reviewed SHA can verify version selection by IDs and immutable URLs. Record that A/B content is identical; this does not demonstrate a visible content change. The [November 4 local HTTP browser record](RESULTS.md#local-http-browser-verification) used this approach, including Keep, restore, deployed React interaction and logout.
+
 The API alternative uses the project and deployment IDs printed earlier. Replace the uppercase placeholders before running these POSIX-shell examples:
 
 ```sh
@@ -178,9 +180,9 @@ Do not present the following as completed evidence merely because their procedur
 - Milestone 2 ordering/rollback and milestone 3 recovery cases have the CI results linked in `PLAN.md`; retain their exact infrastructure/scenario limits.
 - Milestone 4 ownership, signed delivery, host routing and retention have the CI results linked in `PLAN.md`; browser interaction remains separate.
 - Public Git checkout through the fixed Docker recipe passed in CI; [RESULTS.md](RESULTS.md) records its one-run environment and timing.
-- Limited browser session/validation checks and two five-request benchmark bursts are recorded in `RESULTS.md`.
+- Manual local HTTP browser checks covered project creation, A/B deployment/history/logs, Keep, restore, published React interaction and logout; `RESULTS.md` records their exact limits alongside the earlier session checks and two five-request benchmark bursts.
 - The checked-in HTTPS/Nginx example passed a private-CA loopback smoke; `RESULTS.md` records its trust, cookie, routing and artifact checks.
-- Successful project/site browser flows, public DNS/certificate/ingress operation and sustained capacity still need recorded demonstrations.
+- HTTPS browser cookie enforcement, public DNS/certificate/ingress operation and sustained capacity still need recorded demonstrations.
 
 Database tokens and leases govern duplicate/recovery safety. Test evidence still applies only to the scenarios and infrastructure actually exercised.
 

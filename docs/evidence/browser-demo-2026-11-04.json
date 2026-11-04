@@ -1,0 +1,105 @@
+{
+  "kind": "manual local HTTP browser flow, followed by read-only API and artifact-integrity assertions",
+  "recordedAt": "2026-11-04T09:06:57.927Z",
+  "platformSha": "611fd0c7848335c8908a6aa672cb4113d36ddea1",
+  "workspaceChange": ".dockerignore excludes .tmp; application source unchanged",
+  "fixture": {
+    "repo": "https://github.com/adrianhajdin/nike_landing_page.git",
+    "reviewedSha": "cfda8c5841b6e57f644f19aa10c4329553162a15",
+    "sourceChangedBetweenVersions": false
+  },
+  "project": {
+    "id": "59bbe3c5-330b-4d67-9c2f-b6f0e4a02dbe",
+    "name": "Browser Vite 2026-11-04",
+    "slug": "browser-vite-2026-11-04-59bbe3c5",
+    "siteUrl": "http://browser-vite-2026-11-04-59bbe3c5.sites.localhost:3000/",
+    "activeDeploymentId": "a904a9f1-1a8b-4890-83eb-7fc39824256e"
+  },
+  "deployments": [
+    {
+      "label": "A",
+      "id": "a904a9f1-1a8b-4890-83eb-7fc39824256e",
+      "status": "deployed",
+      "commitSha": "cfda8c5841b6e57f644f19aa10c4329553162a15",
+      "createdAt": "2026-11-03T20:02:49.071Z",
+      "startedAt": "2026-11-03T20:02:49.087Z",
+      "finishedAt": "2026-11-03T20:03:09.554Z",
+      "queueWaitMs": 16,
+      "buildDurationMs": 20467.308,
+      "attemptCount": 1,
+      "retained": true,
+      "artifactState": "available",
+      "files": 35,
+      "bytes": 3282526,
+      "persistedLogEntries": 19
+    },
+    {
+      "label": "B",
+      "id": "d66f47ee-e422-42f2-975e-0dbcd9489aa8",
+      "status": "deployed",
+      "commitSha": "cfda8c5841b6e57f644f19aa10c4329553162a15",
+      "createdAt": "2026-11-03T20:04:28.958Z",
+      "startedAt": "2026-11-03T20:04:28.974Z",
+      "finishedAt": "2026-11-03T20:04:53.777Z",
+      "queueWaitMs": 16.792,
+      "buildDurationMs": 24802.289,
+      "attemptCount": 1,
+      "retained": false,
+      "artifactState": "available",
+      "files": 35,
+      "bytes": 3282526,
+      "persistedLogEntries": 18
+    }
+  ],
+  "preRepairFailure": {
+    "id": "f48cfdcc-8710-401e-99b6-ffbd77a663c7",
+    "attemptCount": 3,
+    "error": "Build container exited with code ",
+    "causeObservedOnHost": "Docker CLI binary in cached official source and built worker image was zero bytes; re-pulled exact source after scoped cache removal"
+  },
+  "browserObservations": [
+    "Signed in with existing local operator key; created the real project through Create & deploy",
+    "Observed initial infrastructure failure and all three failed attempts in persisted UI logs",
+    "Deploy latest produced A, with reviewed SHA, Deployed/LIVE status, queue/build timings and live logs",
+    "Open deployment reached the project subdomain and immutable A path; CSS and images rendered",
+    "Clicked second shoe thumbnail; React changed hero from big-shoe1-0c574e3f.png to big-shoe2-84852328.png; both loaded with naturalWidth 610",
+    "Deploy latest produced B and made B LIVE; B remained selected while restoring A",
+    "Kept A, restored A without a new build, and verified LIVE/Keep after reauthentication and reload",
+    "After the long pause, existing eight-hour session showed expiration; existing operator key signed in again",
+    "Stable site URL selected A after restore; immutable B link opened the B path with Nike title",
+    "Sign out returned to sign-in and stayed signed out after reload; public A still rendered after reload"
+  ],
+  "readOnlyAssertions": [
+    "Owner API and database agree on active A, Keep A, available A/B and one attempt per successful version",
+    "A/B each match reviewed fixture SHA and contain 35 files / 3282526 bytes",
+    "Every artifact size and SHA-256 matches through both immutable routes for A and B (140 file responses)",
+    "Both stable routes redirect to restored A; both deployments retain terminal success logs"
+  ],
+  "environment": {
+    "browser": "Codex in-app browser, default narrow viewport",
+    "transport": "local HTTP",
+    "dockerEngine": "29.7.2",
+    "workerDockerCli": "29.9.2",
+    "builderNode": "24.22.2",
+    "builderNpm": "11.19.1",
+    "dockerDataDrive": "S:",
+    "workerConcurrency": 1,
+    "buildCpus": 1,
+    "buildMemoryMiB": 512,
+    "buildPids": 128,
+    "buildTimeoutMs": 300000,
+    "leaseMs": 30000,
+    "maxAttempts": 3
+  },
+  "limits": [
+    "Manual observations, not an automated browser regression suite",
+    "Same source/content in A and B; version IDs prove selection, not a visible content change",
+    "No public DNS, public certificate/ingress, HTTPS browser cookie enforcement or sustained-capacity proof",
+    "No full Windows reboot or backup-restore drill performed",
+    "Fixture used transiently for trusted verification; no source or built artifacts vendored"
+  ],
+  "screenshots": [
+    "browser-deployments-2026-11-04.jpg",
+    "browser-signout-2026-11-04.jpg"
+  ]
+}

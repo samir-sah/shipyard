@@ -2,7 +2,7 @@
 
 Shipyard turns a supported public GitHub repository into a static site on its own subdomain. Sign in, submit a repository, follow its build logs, and restore a completed version without rebuilding it.
 
-All four planned implementation milestones are present: TypeScript API/workers, React dashboard, PostgreSQL metadata, BullMQ/Redis scheduling, bounded Docker builds, immutable S3 artifacts, rollback, worker recovery, ownership, signed webhooks, host routing, and retention. SeaweedFS supplies S3-compatible local storage. [The verification record](docs/PLAN.md#verification-record) covers public Git builds, small benchmark bursts, a private-CA HTTPS proxy smoke and limited browser checks, with remaining limits stated explicitly.
+All four planned implementation milestones are present: TypeScript API/workers, React dashboard, PostgreSQL metadata, BullMQ/Redis scheduling, bounded Docker builds, immutable S3 artifacts, rollback, worker recovery, ownership, signed webhooks, host routing, and retention. SeaweedFS supplies S3-compatible local storage. [The verification record](docs/PLAN.md#verification-record) covers public Git builds, small benchmark bursts, a private-CA HTTPS proxy smoke and a local HTTP browser flow through deployment, Keep, restore, published-site interaction and logout, with remaining limits stated explicitly.
 
 ## Run locally
 
@@ -86,7 +86,7 @@ RUN_INTEGRATION=1 RUN_DOCKER_TESTS=1 npm run test:integration
 
 In PowerShell, set `$env:RUN_INTEGRATION='1'` and `$env:RUN_DOCKER_TESTS='1'` before the last command. Integration tests require running backing services; Docker cases also require the builder image and a Linux daemon. Retention/ownership maintenance suites use isolated random PostgreSQL schemas. Other suites use unique fixture IDs in the configured database; run them against disposable development services. Never infer a passing integration run from an unset flag and skipped tests.
 
-The [demo guide](docs/DEMO.md) covers successful/failed deployments, rollback, crashes, ownership, webhook redelivery, and retention. The helper requires `SHIPYARD_TOKEN` set explicitly to an operator access token. CI also runs a reviewed public Vite repository through the real Docker build and verifies every served artifact. Manual CI dispatch adds two five-request benchmark bursts at worker concurrency 1 and 2. [Recorded results](docs/RESULTS.md) include raw timing, machine limits and limited browser checks; [sustained capacity](docs/BENCHMARK.md) remains unmeasured.
+The [demo guide](docs/DEMO.md) covers successful/failed deployments, rollback, crashes, ownership, webhook redelivery, and retention. The helper requires `SHIPYARD_TOKEN` set explicitly to an operator access token. CI also runs a reviewed public Vite repository through the real Docker build and verifies every served artifact. Manual CI dispatch adds two five-request benchmark bursts at worker concurrency 1 and 2. [Recorded results](docs/RESULTS.md) include raw timing, machine limits and the manual local HTTP browser flow; [sustained capacity](docs/BENCHMARK.md) remains unmeasured.
 
 ## Upgrade and operation
 

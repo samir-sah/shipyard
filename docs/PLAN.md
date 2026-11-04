@@ -86,7 +86,7 @@ Implementation includes:
 - A manual dedicated-host deployment procedure covering credentials, HTTPS/DNS/proxy boundaries, health/log monitoring, backups, upgrades and failure handling. An example Nginx config uses operator-supplied certificates; TLS was not provisioned or deployed by these changes.
 - Isolated-schema SQL/security/webhook/retention tests, so maintenance test fixtures cannot tombstone existing development projects.
 
-All four implementation milestones are present. Final CI, the public Git-to-Docker smoke, two five-request benchmark bursts and a private-CA Nginx HTTPS smoke passed. Limited local browser session/validation checks also passed. Remaining work is successful project/site browser flows, public DNS/certificate/ingress operation, and sustained capacity measurements. These are not an additional feature milestone. Production reliability and hostile-code isolation remain unproven.
+All four implementation milestones are present. CI, the public Git-to-Docker smoke, two five-request benchmark bursts and a private-CA Nginx HTTPS smoke passed. A manual local HTTP browser flow also passed project creation, deployment/history/logs, Keep, restore, published-site JavaScript and logout. Remaining work includes HTTPS browser cookie enforcement, public DNS/certificate/ingress operation and sustained capacity measurements. These are not an additional feature milestone. Production reliability and hostile-code isolation remain unproven.
 
 Custom domains, additional build recipes, Kubernetes, and arbitrary backend applications remain deferred. Backend applications need a separate runtime lifecycle design.
 
@@ -189,6 +189,19 @@ HTTPS proxy verification and local runtime follow-up, November 3, 2026 UTC:
 | Local full browser attempt | Incomplete: image build hit Go SIGBUS and host C: was confirmed full; local Docker/WSL returned to stopped state with its data preserved |
 
 [RESULTS.md](RESULTS.md) links the durable proxy report and records the failed first test-client framing check separately from the successful retry. No product code or Nginx configuration changed. Public DNS/certificate issuance/ingress, browser cookie enforcement and deployed JavaScript, sustained capacity and production guarantees remain unverified. Host capacity must be checked on Docker's actual data drive before local image pulls, even when the workspace has ample space elsewhere.
+
+Local HTTP browser verification, November 4, 2026 (Asia/Calcutta):
+
+| Command/check | Actual outcome |
+| --- | --- |
+| [CI on `611fd0c`](https://github.com/samir-sah/shipyard/actions/runs/41695503647) | Passed; the local browser run used this product revision with only `.tmp` excluded from Docker build context |
+| Docker storage and runtime recovery | Data relocated to `S:` with offline backups retained; baseline images, volumes and unrelated containers preserved. Zero-byte cached Docker/npm CLI files and a Node crash required narrow runtime repair before the successful builds |
+| Real Compose/browser flow | Created a project from reviewed public Nike/Vite commit `cfda8c5841b6e57f644f19aa10c4329553162a15`; initial infrastructure failure exhausted three attempts, then Deploy latest produced successful A and B with one attempt each |
+| Keep/restore/history/logs | Kept A and restored it while B remained selected; after session expiry, reauthentication and reload preserved A as LIVE and kept. Stable A and immutable B links remained available |
+| Published JavaScript and logout | Shoe thumbnail changed the rendered hero image; sign-out survived reload while public A still rendered |
+| Read-only integrity checks | All 140 artifact responses matched size/SHA-256 across A/B and both immutable routes; each version contained 35 files / 3,282,526 bytes |
+
+[RESULTS.md](RESULTS.md#local-http-browser-verification) links the sanitized report, exact timings and screenshots. This was a manual default-narrow-viewport HTTP check, with the same source/content in A and B. It does not establish HTTPS browser enforcement, public DNS/certificate/ingress operation, sustained capacity, a full Windows reboot or a backup-restore drill. Earlier dated limitations above describe their original checks.
 
 ## Dependency decisions and official references
 
